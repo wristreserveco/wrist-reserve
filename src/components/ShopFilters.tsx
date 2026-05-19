@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useTransition } from "react";
 import type { Category } from "@/lib/types";
 import { WATCH_CATEGORIES } from "@/lib/categories";
+import { getRootCategory } from "@/lib/products";
 import { PUBLIC_TIERS, TIER_META, type ProductTier } from "@/lib/tiers";
 
 export type SortKey =
@@ -30,11 +31,9 @@ interface ShopFiltersProps {
   categories?: Category[];
   activeTier?: ProductTier | null;
   /**
-   * Category IDs (top-level brand AND sub-category) that currently have live
-   * inventory. When provided, the Collections chip row is filtered to only
-   * brands with something in stock — keeps the UI honest and prevents buyers
-   * from clicking into empty shelves. If omitted, every top-level category
-   * in the DB is shown (legacy behaviour).
+   * Category IDs (any depth) that currently have at least one **buyable**
+   * unit (`available` + `quantity > 0`). When provided, Collections chips
+   * and the brand dropdown only advertise shelves that aren't empty.
    */
   liveCategoryIds?: string[];
 }
@@ -53,8 +52,6 @@ export function ShopFilters({
   const q = searchParams.get("q") ?? "";
   const categorySlug = searchParams.get("category") ?? "";
   const sort = (searchParams.get("sort") as SortKey | null) ?? "newest";
-  const stock = searchParams.get("stock") ?? "";
-
   const setParam = useCallback(
     (key: string, value: string) => {
       const next = new URLSearchParams(searchParams.toString());
@@ -78,14 +75,11 @@ export function ShopFilters({
   const topCategories = useMemo(() => {
     const tops = categories.filter((c) => !c.parent_id);
     if (!liveCategoryIds) return tops;
-    const liveSet = new Set(liveCategoryIds);
-    // A brand counts if the brand row itself has stock, or any of its
-    // sub-categories do.
     const brandsWithStock = new Set<string>();
-    for (const cat of categories) {
-      if (!liveSet.has(cat.id)) continue;
-      brandsWithStock.add(cat.parent_id ?? cat.id);
-    }
+    liveCategoryIds.forEach((id) => {
+      const root = getRootCategory(categories, id);
+      if (root) brandsWithStock.add(root.id);
+    });
     // Always keep the currently-selected category in the row so the active
     // chip never disappears mid-browse (even if its last piece just sold).
     const selected = categorySlug
@@ -98,15 +92,15 @@ export function ShopFilters({
   const usingDbCategories = topCategories.length > 0;
 
   return (
-    <div className="mb-12 border-b border-white/10 pb-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mb-6 border-b border-white/10 pb-6 sm:mb-12 sm:pb-10">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-white/35">Refine</p>
           <h1 className="mt-2 font-display text-3xl text-white sm:text-4xl">
             The Collection
           </h1>
         </div>
-        <div className="flex flex-wrap items-end gap-4">
+        <div className="flex flex-wrap items-end gap-3 sm:gap-4">
           <label className="flex flex-col gap-1 text-xs uppercase tracking-[0.15em] text-white/40">
             Brand
             <select
@@ -138,18 +132,6 @@ export function ShopFilters({
               ))}
             </select>
           </label>
-          <label className="flex cursor-pointer items-center gap-2 pb-[0.6rem] text-xs uppercase tracking-[0.15em] text-white/55">
-            <input
-              type="checkbox"
-              checked={stock === "available"}
-              disabled={pending}
-              onChange={(e) =>
-                setParam("stock", e.target.checked ? "available" : "")
-              }
-              className="h-4 w-4 accent-gold-400"
-            />
-            Hide sold out
-          </label>
         </div>
       </div>
 
@@ -157,14 +139,14 @@ export function ShopFilters({
           premium light-switch so there's zero ambiguity about tap-to-filter
           vs tap-to-clear, even for buyers who aren't used to filter chips. */}
       {PUBLIC_TIERS.length > 0 ? (
-        <div className="mt-8 space-y-3">
+        <div className="mt-4 space-y-2 sm:mt-8 sm:space-y-3">
           {PUBLIC_TIERS.map((tierKey) => {
             const active = activeTier === tierKey;
             const meta = TIER_META[tierKey];
             return (
               <label
                 key={tierKey}
-                className={`group flex cursor-pointer select-none items-center justify-between gap-4 rounded-sm border px-4 py-3 transition ${
+                className={`group flex cursor-pointer select-none items-center justify-between gap-3 rounded-sm border px-3 py-2 transition sm:gap-4 sm:px-4 sm:py-3 ${
                   active
                     ? "border-gold-400/50 bg-gold-400/[0.06]"
                     : "border-white/10 bg-white/[0.02] hover:border-gold-500/30 hover:bg-gold-500/[0.04]"
@@ -177,11 +159,6 @@ export function ShopFilters({
                     }`}
                   >
                     {meta.label}
-                  </p>
-                  <p className="mt-1 text-[11px] text-white/45">
-                    {active
-                      ? `Showing ${meta.label} only. Flip off for the full catalog.`
-                      : `Flip on to narrow to ${meta.label} pieces.`}
                   </p>
                 </div>
                 <span className="sr-only">Toggle {meta.label} filter</span>

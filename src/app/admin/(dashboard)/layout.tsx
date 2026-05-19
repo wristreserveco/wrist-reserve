@@ -12,10 +12,18 @@ const AdminAlerts = dynamic(
 
 export default function AdminDashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen bg-black text-white">
+    // Sidebar handles its own positioning across breakpoints:
+    //  - mobile: sticky top bar + slide-in drawer
+    //  - md+:    sticky 224px column on the left
+    // The main content sits in a flex sibling so md+ shows them side-by-
+    // side; on mobile the sidebar is `fixed` (drawer) so the content
+    // takes the full width naturally.
+    <div className="min-h-screen bg-black text-white md:flex">
       <AdminSidebar />
-      <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl px-6 py-10">{children}</div>
+      <div className="min-w-0 flex-1 overflow-x-hidden">
+        <div className="mx-auto max-w-6xl px-3 py-6 sm:px-6 sm:py-10">
+          {children}
+        </div>
       </div>
       <AdminAlerts />
     </div>

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  rateLimit,
+  clientIpFromRequest,
+  tooManyResponse,
+} from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -28,6 +33,15 @@ function extensionFor(file: File): string {
 }
 
 export async function POST(request: Request) {
+  const ip = clientIpFromRequest(request);
+  const rl = await rateLimit({
+    key: `chat-upload:${ip}`,
+    limit: 20,
+    windowSec: 60,
+  });
+  const blocked = tooManyResponse(rl);
+  if (blocked) return blocked;
+
   // Require a started chat session so random bots can't spam storage.
   const cookieStore = await cookies();
   const email = cookieStore.get("wr_chat_email")?.value;
@@ -87,7 +101,7 @@ export async function POST(request: Request) {
     .upload(path, arrayBuffer, {
       contentType: file.type,
       upsert: false,
-      cacheControl: "3600",
+      cacheControl: "31536000, immutable",
     });
   if (upErr) {
     return NextResponse.json(

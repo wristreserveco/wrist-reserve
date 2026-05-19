@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { logOrderEvent, type OrderEventKind } from "@/lib/orders/events";
 import { decrementProductStock } from "@/lib/inventory";
+import { autoBuyLabelForOrder, isAutoShipEnabled } from "@/lib/shipping/autoship";
+import { logAuditEvent, auditContextFromRequest } from "@/lib/security/audit-log";
 
 export const runtime = "nodejs";
 
@@ -41,11 +43,24 @@ export async function PATCH(
   const service = createServiceClient();
   const orderId = params.id;
 
-  const { data: order, error: getErr } = await service
+  // `quantity` column may not exist on installs that haven't applied
+  // migration 016 yet — fall back to the older shape.
+  let orderRes = await service
     .from("orders")
-    .select("id, product_id, payment_status")
+    .select("id, product_id, payment_status, quantity")
     .eq("id", orderId)
     .single();
+  if (
+    orderRes.error &&
+    /column|quantity|schema|does not exist/i.test(orderRes.error.message)
+  ) {
+    orderRes = await service
+      .from("orders")
+      .select("id, product_id, payment_status")
+      .eq("id", orderId)
+      .single();
+  }
+  const { data: order, error: getErr } = orderRes;
   if (getErr || !order) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
@@ -81,6 +96,15 @@ export async function PATCH(
       actor: "admin",
       message,
       metadata: { ...(metadata ?? {}), email: user.email ?? null },
+    });
+    await logAuditEvent({
+      service,
+      ...auditContextFromRequest(request, user),
+      kind: `order.${kind}`,
+      targetKind: "order",
+      targetId: orderId,
+      message,
+      metadata,
     });
     return NextResponse.json({ ok: true });
   };
@@ -139,7 +163,17 @@ export async function PATCH(
         "Admin verified payment and marked order paid"
       );
       if (order.product_id) {
-        await decrementProductStock(service, order.product_id);
+        const qty =
+          typeof (order as { quantity?: number }).quantity === "number" &&
+          (order as { quantity?: number }).quantity! > 0
+            ? (order as { quantity?: number }).quantity!
+            : 1;
+        await decrementProductStock(service, order.product_id, qty);
+      }
+      if (isAutoShipEnabled()) {
+        void autoBuyLabelForOrder({ service, orderId }).catch((err) =>
+          console.error("[autoship] PATCH mark_paid:", err)
+        );
       }
       return res;
     }

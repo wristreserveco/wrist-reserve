@@ -2,6 +2,12 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+  // /.well-known/* — no session work; keep response minimal.
+  if (pathname.startsWith("/.well-known/")) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -34,8 +40,6 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const pathname = request.nextUrl.pathname;
-
   if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
     if (!user) {
       const redirect = NextResponse.redirect(new URL("/admin/login", request.url));
@@ -48,6 +52,21 @@ export async function middleware(request: NextRequest) {
 
   if (pathname === "/admin/login" && user) {
     return NextResponse.redirect(new URL("/admin", request.url));
+  }
+
+  // Product + checkout HTML must not be cached aggressively — Safari especially
+  // can keep an old document that still references stale checkout JS chunks.
+  if (
+    pathname === "/" ||
+    pathname === "/cart" ||
+    pathname.startsWith("/products/") ||
+    pathname === "/shop" ||
+    pathname.startsWith("/checkout/")
+  ) {
+    supabaseResponse.headers.set(
+      "Cache-Control",
+      "private, no-cache, no-store, max-age=0, must-revalidate"
+    );
   }
 
   return supabaseResponse;

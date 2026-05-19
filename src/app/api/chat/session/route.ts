@@ -1,6 +1,35 @@
 import { NextResponse } from "next/server";
+import {
+  rateLimit,
+  clientIpFromRequest,
+  tooManyResponse,
+} from "@/lib/security/rate-limit";
+
+const CLEAR = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  path: "/",
+  maxAge: 0,
+};
+
+export async function DELETE() {
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set("wr_chat_email", "", CLEAR);
+  res.cookies.set("wr_chat_name", "", CLEAR);
+  return res;
+}
 
 export async function POST(request: Request) {
+  const ip = clientIpFromRequest(request);
+  const rl = await rateLimit({
+    key: `chat-session:${ip}`,
+    limit: 30,
+    windowSec: 60,
+  });
+  const blocked = tooManyResponse(rl);
+  if (blocked) return blocked;
+
   let body: { email?: string; name?: string };
   try {
     body = (await request.json()) as { email?: string; name?: string };

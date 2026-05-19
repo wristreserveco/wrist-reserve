@@ -25,14 +25,52 @@ export interface Product {
    * “Already on wrists” strip. Defaults true when the column is absent.
    */
   on_wrist_spotlight: boolean;
+  /**
+   * When true, the product is hidden from public listings and the product
+   * detail page returns 404. Admin panel still shows it (with a "Hidden"
+   * badge) so you can unhide easily.
+   */
+  hidden: boolean;
   created_at: string;
-  /** Optional per-product Square Checkout URL. Falls back to NEXT_PUBLIC_SQUARE_CHECKOUT_URL. */
-  square_url?: string | null;
   /**
    * Catalog tier. `classic` = everyday collection, `super_tier` = premium line.
    * Defaults to `classic` for any product pre-dating the tier migration.
    */
   tier: ProductTier;
+}
+
+export interface ProductReview {
+  id: string;
+  product_id: string;
+  reviewer_name: string;
+  email: string | null;
+  rating: number;
+  body: string;
+  approved: boolean;
+  created_at: string;
+  /**
+   * Optional reviewer-attached photos (URLs to images in `product-media`
+   * storage). Kept as a free-form array so we can render thumbnails and
+   * lightboxes without needing a separate `review_photos` table.
+   */
+  photos?: string[] | null;
+}
+
+/**
+ * "Word of Mouth" wall entry — a single screenshot of off-platform social
+ * proof (Instagram DM, iMessage, WhatsApp, etc.) shown on /word-of-mouth.
+ */
+export interface Testimonial {
+  id: string;
+  image_url: string;
+  source: string | null;
+  customer_name: string | null;
+  caption: string | null;
+  product_id: string | null;
+  posted_at: string | null;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
 }
 
 export interface Category {
@@ -75,7 +113,7 @@ export interface MessageRow {
   created_at: string;
 }
 
-export type PaymentMethod = "crypto" | "manual" | "stripe";
+export type PaymentMethod = "crypto" | "paypal";
 export type PaymentStatus =
   | "pending"
   | "paid"

@@ -5,9 +5,10 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { useCart } from "@/components/providers/CartProvider";
 import { formatPrice, parseMediaUrls } from "@/lib/products";
+import { LUXE_BLUR_DATA_URL, shouldUnoptimize } from "@/lib/image-placeholder";
 
 export default function CartPage() {
-  const { lines, removeLine, clear } = useCart();
+  const { lines, removeLine, setQuantity, clear } = useCart();
 
   if (lines.length === 0) {
     return (
@@ -59,7 +60,9 @@ export default function CartPage() {
                     fill
                     className="object-cover"
                     sizes="96px"
-                    unoptimized={img.includes("unsplash")}
+                    placeholder="blur"
+                    blurDataURL={LUXE_BLUR_DATA_URL}
+                    unoptimized={shouldUnoptimize(img)}
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-[10px] text-white/30">
@@ -75,10 +78,48 @@ export default function CartPage() {
                   >
                     {line.product.name}
                   </Link>
-                  <p className="mt-1 text-xs text-white/40">Qty {line.quantity}</p>
+                  <p className="mt-1 text-xs text-white/40">
+                    {formatPrice(line.product.price)} each
+                    {line.product.quantity ? (
+                      <span className="ml-2 text-white/30">
+                        · {line.product.quantity} in stock
+                      </span>
+                    ) : null}
+                  </p>
                 </div>
-                <div className="mt-4 flex items-center gap-6 sm:mt-0">
-                  <p className="text-sm text-white/80">{formatPrice(line.product.price * line.quantity)}</p>
+                <div className="mt-4 flex items-center gap-4 sm:mt-0 sm:gap-6">
+                  <div className="flex items-center gap-1 rounded-sm border border-white/15 bg-black/40 p-1">
+                    <button
+                      type="button"
+                      aria-label="Decrease quantity"
+                      onClick={() =>
+                        setQuantity(line.product.id, line.quantity - 1)
+                      }
+                      className="h-8 w-8 rounded-sm text-sm text-white/80 transition hover:bg-white/10"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[2rem] text-center text-sm text-white">
+                      {line.quantity}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Increase quantity"
+                      onClick={() =>
+                        setQuantity(line.product.id, line.quantity + 1)
+                      }
+                      disabled={
+                        !!line.product.quantity &&
+                        line.quantity >= line.product.quantity
+                      }
+                      className="h-8 w-8 rounded-sm text-sm text-white/80 transition hover:bg-white/10 disabled:opacity-30"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className="text-sm text-white/80">
+                    {formatPrice(line.product.price * line.quantity)}
+                  </p>
                   <button
                     type="button"
                     onClick={() => removeLine(line.product.id)}
@@ -98,7 +139,7 @@ export default function CartPage() {
           Subtotal <span className="ml-4 font-display text-2xl text-white">{formatPrice(total)}</span>
         </p>
         <p className="max-w-md text-right text-xs text-white/35">
-          Checkout is per piece. Open a product and use Buy Now for Stripe Checkout.
+          Checkout is per piece. Open a product and use Buy Now to pay with PayPal or crypto.
         </p>
         <Link
           href="/shop"

@@ -6,6 +6,8 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import type { HeroCategorySlide } from "@/lib/categories";
 import type { HeroSlide } from "@/lib/types";
+import { LUXE_BLUR_DATA_URL } from "@/lib/image-placeholder";
+import { useCanAutoplay } from "@/lib/media/playback-policy";
 
 const INTERVAL_MS = 6000;
 
@@ -21,8 +23,16 @@ type NormalizedSlide = {
   heroVideo: string | null;
   ctaLabel: string;
   ctaHref: string;
-  variants: { src: string; label?: string }[];
+  variants: { src: string; label?: string; href?: string }[];
 };
+
+function remoteImageUnoptimized(url: string): boolean {
+  return (
+    url.includes("unsplash") ||
+    url.includes("wikimedia.org") ||
+    url.includes("upload.wikimedia.org")
+  );
+}
 
 function normalizeAdminSlide(s: HeroSlide): NormalizedSlide {
   return {
@@ -65,6 +75,12 @@ export function HeroCarousel({
   tierSpotlight?: HeroSlide | null;
 }) {
   const [index, setIndex] = useState(0);
+  // Same policy as ProductCard: skip hero video on touch / data-saver /
+  // slow-connection devices. Falls back to the hero poster image (or a
+  // black background if neither is set). One <video> on the homepage isn't
+  // the egress killer the cards were, but this still saves ~3-5MB/visit
+  // for the ~40% of buyers on phones.
+  const canAutoplay = useCanAutoplay();
 
   const baseNormalized: NormalizedSlide[] =
     adminSlides && adminSlides.length > 0
@@ -107,13 +123,15 @@ export function HeroCarousel({
           transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1] }}
           className="absolute inset-0"
         >
-          {slide.heroVideo ? (
+          {slide.heroVideo && canAutoplay ? (
             <video
               src={slide.heroVideo}
+              poster={slide.heroImage ?? undefined}
               autoPlay
               muted
               loop
               playsInline
+              preload="metadata"
               className="absolute inset-0 h-full w-full object-cover opacity-80"
             />
           ) : slide.heroImage ? (
@@ -122,12 +140,21 @@ export function HeroCarousel({
               alt={slide.title}
               fill
               priority
-              unoptimized={
-                slide.heroImage.includes("unsplash") ||
-                slide.heroImage.includes("wikimedia")
-              }
+              unoptimized={remoteImageUnoptimized(slide.heroImage)}
               sizes="100vw"
+              placeholder="blur"
+              blurDataURL={LUXE_BLUR_DATA_URL}
               className="object-cover opacity-80"
+            />
+          ) : slide.heroVideo ? (
+            // Last-resort fallback: device can't autoplay AND no poster.
+            // Show the first frame via preload="metadata" but never play.
+            <video
+              src={slide.heroVideo}
+              muted
+              playsInline
+              preload="metadata"
+              className="absolute inset-0 h-full w-full object-cover opacity-80"
             />
           ) : null}
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/20" />
@@ -186,31 +213,44 @@ export function HeroCarousel({
                   transition={{ duration: 0.7, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
                   className="grid grid-cols-4 gap-3 lg:ml-auto lg:max-w-md"
                 >
-                  {slide.variants.map((v, i) => (
-                    <motion.div
-                      key={`${slide.id}-${v.src}-${i}`}
-                      initial={{ opacity: 0, y: 16 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.5, delay: 0.2 + i * 0.08 }}
-                      className="group relative"
-                    >
-                      <div className="relative aspect-[3/4] overflow-hidden rounded-sm border border-white/10 bg-white/[0.02]">
-                        <Image
-                          src={v.src}
-                          alt={v.label ?? slide.title}
-                          fill
-                          unoptimized={v.src.includes("unsplash")}
-                          sizes="(max-width: 768px) 25vw, 120px"
-                          className="object-cover opacity-90 transition duration-700 group-hover:scale-105 group-hover:opacity-100"
-                        />
-                      </div>
-                      {v.label ? (
-                        <p className="mt-1.5 text-center text-[10px] uppercase tracking-[0.18em] text-white/45">
-                          {v.label}
-                        </p>
-                      ) : null}
-                    </motion.div>
-                  ))}
+                  {slide.variants.map((v, i) => {
+                    const tileHref = v.href ?? slide.ctaHref;
+                    return (
+                      <motion.div
+                        key={`${slide.id}-${v.src}-${i}`}
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, delay: 0.2 + i * 0.08 }}
+                        className="group relative"
+                      >
+                        <Link
+                          href={tileHref}
+                          className="block cursor-pointer outline-none ring-gold-500/30 focus-visible:ring-2"
+                          aria-label={
+                            v.label
+                              ? `${v.label} — view in shop`
+                              : `Shop ${slide.title}`
+                          }
+                        >
+                          <div className="relative aspect-[3/4] overflow-hidden rounded-sm border border-white/10 bg-white/[0.02]">
+                            <Image
+                              src={v.src}
+                              alt={v.label ?? slide.title}
+                              fill
+                              unoptimized={remoteImageUnoptimized(v.src)}
+                              sizes="(max-width: 768px) 25vw, 120px"
+                              className="object-cover opacity-90 transition duration-700 group-hover:scale-105 group-hover:opacity-100"
+                            />
+                          </div>
+                          {v.label ? (
+                            <p className="mt-1.5 text-center text-[10px] uppercase tracking-[0.18em] text-white/45 transition group-hover:text-gold-200/90">
+                              {v.label}
+                            </p>
+                          ) : null}
+                        </Link>
+                      </motion.div>
+                    );
+                  })}
                 </motion.div>
               </AnimatePresence>
             ) : null}

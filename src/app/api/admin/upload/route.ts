@@ -9,21 +9,29 @@ export const maxDuration = 300;
 
 const BUCKET = "product-media";
 
+// Supabase Storage rejects keys with characters outside a conservative set —
+// anything non-ASCII, spaces, quotes, %, #, etc. Keep it to [a-z0-9.-] only.
 function slugify(name: string): string {
   return name
     .normalize("NFKD")
-    .replace(/[^\w.-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
+    // strip combining marks (accents)
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/[^a-z0-9.-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
     .slice(0, 80);
 }
 
 function extensionFor(file: File): string {
   const fromName = file.name.split(".").pop();
-  if (fromName && fromName.length <= 5) return fromName.toLowerCase();
-  const fromType = file.type.split("/")[1];
-  return (fromType ?? "bin").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (fromName) {
+    const clean = fromName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (clean.length >= 1 && clean.length <= 5) return clean;
+  }
+  const fromType = (file.type.split(";")[0].split("/")[1] ?? "").toLowerCase();
+  const clean = fromType.replace(/[^a-z0-9]+/g, "");
+  return clean || "bin";
 }
 
 export async function POST(request: Request) {
@@ -58,19 +66,40 @@ export async function POST(request: Request) {
     const base = slugify(file.name.replace(/\.[^.]+$/, "")) || "file";
     const ext = extensionFor(file);
     const folder = kind === "video" ? "videos" : "images";
-    const path = `${folder}/${ts}-${rand}-${base}.${ext}`;
+    // Final safety net: strip anything that somehow slipped through.
+    const rawPath = `${folder}/${ts}-${rand}-${base}.${ext}`;
+    const path = rawPath.replace(/[^a-z0-9./\-]+/gi, "-");
 
-    const arrayBuffer = await file.arrayBuffer();
+    let arrayBuffer: ArrayBuffer;
+    try {
+      arrayBuffer = await file.arrayBuffer();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json(
+        {
+          error: `Upload failed while reading the file (${msg}). If the video is very long try trimming it locally first.`,
+        },
+        { status: 500 }
+      );
+    }
     const { error: upErr } = await service.storage.from(BUCKET).upload(path, arrayBuffer, {
       contentType: file.type || (kind === "video" ? "video/mp4" : "image/jpeg"),
       upsert: false,
-      cacheControl: "3600",
+      // 1-year browser cache. Media uploaded via this endpoint is
+      // content-addressed (timestamp + random suffix), so the URL never
+      // points at different bytes — safe to cache indefinitely. This is
+      // critical for keeping Supabase Storage egress under the free
+      // plan's 5GB/mo cached-egress cap.
+      cacheControl: "31536000, immutable",
     });
     if (upErr) {
-      return NextResponse.json(
-        { error: `Upload failed: ${upErr.message}` },
-        { status: 500 }
-      );
+      const msg = upErr.message || "";
+      const friendly = /string did not match|pattern/i.test(msg)
+        ? `Upload failed: that filename has characters Supabase Storage won't accept. Try renaming the file to plain letters/numbers.`
+        : /exceeded|too large|size/i.test(msg)
+        ? `Upload failed: file is too large (limit 500MB).`
+        : `Upload failed: ${msg}`;
+      return NextResponse.json({ error: friendly }, { status: 500 });
     }
     const { data: pub } = service.storage.from(BUCKET).getPublicUrl(path);
     uploaded.push({

@@ -4,7 +4,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { isSupabaseConfigured } from "@/lib/env";
 import { formatPrice } from "@/lib/products";
 import { PendingOrderTracker } from "@/components/checkout/PendingOrderTracker";
-import { makeMemoCode } from "@/lib/payments/manual";
+import { OptionalAccountNudge } from "@/components/checkout/OptionalAccountNudge";
+import { makeMemoCode } from "@/lib/orders/memo";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,10 @@ export default async function PendingOrderPage({ params }: Props) {
     : { data: null };
 
   const memo = makeMemoCode(order.id);
+  const offerAccountLink =
+    order.payment_status === "paid" &&
+    typeof order.email === "string" &&
+    order.email.trim().includes("@");
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-20 sm:px-6 lg:px-8">
@@ -52,6 +57,8 @@ export default async function PendingOrderPage({ params }: Props) {
       <div className="mt-10">
         <PendingOrderTracker orderId={order.id} />
       </div>
+
+      <OptionalAccountNudge orderId={order.id} show={offerAccountLink} />
 
       <div className="mt-10 flex flex-wrap gap-4 text-sm">
         <Link

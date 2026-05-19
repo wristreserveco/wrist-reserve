@@ -17,7 +17,10 @@ export interface CartLine {
 
 interface CartContextValue {
   lines: CartLine[];
-  addLine: (product: Product) => void;
+  /** Add `qty` units of the product (default 1). Merges with existing line. */
+  addLine: (product: Product, qty?: number) => void;
+  /** Set an absolute quantity for a line. Passing <= 0 removes the line. */
+  setQuantity: (productId: string, qty: number) => void;
   removeLine: (productId: string) => void;
   clear: () => void;
   count: number;
@@ -55,15 +58,34 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [lines]);
 
-  const addLine = useCallback((product: Product) => {
+  const addLine = useCallback((product: Product, qty: number = 1) => {
+    const bump = Math.max(1, Math.floor(qty));
+    const cap = Math.max(1, product.quantity ?? 1);
     setLines((prev) => {
       const idx = prev.findIndex((l) => l.product.id === product.id);
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = { ...next[idx], quantity: next[idx].quantity + 1 };
+        next[idx] = {
+          ...next[idx],
+          quantity: Math.min(cap, next[idx].quantity + bump),
+        };
         return next;
       }
-      return [...prev, { product, quantity: 1 }];
+      return [...prev, { product, quantity: Math.min(cap, bump) }];
+    });
+  }, []);
+
+  const setQuantity = useCallback((productId: string, qty: number) => {
+    setLines((prev) => {
+      const idx = prev.findIndex((l) => l.product.id === productId);
+      if (idx < 0) return prev;
+      const target = prev[idx];
+      const cap = Math.max(1, target.product.quantity ?? 1);
+      const clamped = Math.min(cap, Math.max(0, Math.floor(qty)));
+      if (clamped === 0) return prev.filter((_, i) => i !== idx);
+      const next = [...prev];
+      next[idx] = { ...target, quantity: clamped };
+      return next;
     });
   }, []);
 
@@ -79,8 +101,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ lines, addLine, removeLine, clear, count }),
-    [lines, addLine, removeLine, clear, count]
+    () => ({ lines, addLine, setQuantity, removeLine, clear, count }),
+    [lines, addLine, setQuantity, removeLine, clear, count]
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

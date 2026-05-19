@@ -53,6 +53,7 @@ async function loadHomeData(): Promise<{
     supabase
       .from("products")
       .select("*")
+      .or("hidden.is.null,hidden.eq.false")
       .order("created_at", { ascending: false }),
     supabase
       .from("categories")
@@ -109,9 +110,10 @@ async function loadHomeData(): Promise<{
   }
 
   const featured = allProducts.filter((p) => p.featured).slice(0, 12);
-  // “Already on wrists” — only sold pieces you’ve left in the spotlight in admin.
+  // “Already on wrists” — purely admin-controlled. Whatever you pin via the
+  // `on_wrist_spotlight` toggle shows up here, regardless of sold status.
   const sold = allProducts
-    .filter((p) => p.status === "sold" && p.on_wrist_spotlight !== false)
+    .filter((p) => p.on_wrist_spotlight !== false)
     .slice(0, 6);
   const superTierSpotlight = allProducts
     .filter((p) => p.tier === "super_tier" && p.status !== "sold")
@@ -120,11 +122,23 @@ async function loadHomeData(): Promise<{
 
   // Super Tier hero slide — always present so the tier gets top-of-funnel
   // exposure regardless of current inventory. If we have super_tier pieces
-  // we borrow the first one's cover art; otherwise we fall back to the
-  // newest featured (or newest overall) product so the slide never looks
-  // empty.
+  // we borrow the first one's cover art; otherwise we fall back to a
+  // featured/newest Rolex-family product rather than *any* newest product.
+  // Without this filter the slide briefly became a Seiko photo when Seikos
+  // were the most recently-added rows — jarring for a "flagship tier" slide.
+  const rolexLike = (p: Product) => {
+    const hay = `${p.brand ?? ""} ${p.name}`.toLowerCase();
+    return (
+      hay.includes("rolex") ||
+      hay.includes("patek") ||
+      hay.includes("audemars") ||
+      hay.includes("richard mille")
+    );
+  };
   const heroImage =
     superTierSpotlight[0]?.media_urls?.[0] ??
+    featured.find((p) => (p.media_urls ?? [])[0] && rolexLike(p))?.media_urls?.[0] ??
+    allProducts.find((p) => (p.media_urls ?? [])[0] && rolexLike(p))?.media_urls?.[0] ??
     featured[0]?.media_urls?.[0] ??
     allProducts[0]?.media_urls?.[0] ??
     null;

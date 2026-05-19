@@ -4,27 +4,26 @@ import { useEffect, useRef, useState } from "react";
 import { AddToCartButton } from "@/components/AddToCartButton";
 import { ChatWithUsLink } from "@/components/ChatWithUsLink";
 import { UrgencyRow } from "@/components/UrgencyRow";
-import { PaymentMethodModal } from "@/components/PaymentMethodModal";
+import { PaymentMethodModal, type Rail } from "@/components/PaymentMethodModal";
 import { formatPrice } from "@/lib/products";
 import type { Product } from "@/lib/types";
-import type { ManualMethod } from "@/lib/payments/manual";
-
-type Rail = "crypto" | "stripe" | "manual";
 
 interface Props {
   product: Product;
   availableRails: Rail[];
-  manualMethods: ManualMethod[];
 }
 
-export function ProductPurchaseBlock({
-  product,
-  availableRails,
-  manualMethods,
-}: Props) {
+export function ProductPurchaseBlock({ product, availableRails }: Props) {
   const inlineRef = useRef<HTMLDivElement>(null);
   const [showSticky, setShowSticky] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [qty, setQty] = useState(1);
+
+  const maxQty = Math.max(1, product.quantity ?? 1);
+  // Re-clamp if a background inventory update drops max below current pick.
+  useEffect(() => {
+    if (qty > maxQty) setQty(maxQty);
+  }, [maxQty, qty]);
 
   useEffect(() => {
     const el = inlineRef.current;
@@ -39,24 +38,65 @@ export function ProductPurchaseBlock({
 
   const sold = product.status !== "available";
   const disabled = sold;
+  // Always show the stepper on in-stock items (capped at current stock) so
+  // buyers always see the option — even for 1-in-stock listings.
+  const showQtyPicker = !sold;
+  const subtotal = product.price * qty;
 
   return (
     <>
       <UrgencyRow />
       <div ref={inlineRef} className="mt-6 space-y-4">
+        {showQtyPicker ? (
+          <div className="flex items-center justify-between gap-3 rounded-sm border border-white/10 bg-white/[0.02] px-4 py-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+                Quantity
+              </p>
+              <p className="mt-0.5 text-[11px] text-white/50">
+                {maxQty} in stock · {formatPrice(subtotal)} subtotal
+              </p>
+            </div>
+            <div className="flex items-center gap-1 rounded-sm border border-white/15 bg-black/40 p-1">
+              <button
+                type="button"
+                aria-label="Decrease quantity"
+                onClick={() => setQty((q) => Math.max(1, q - 1))}
+                disabled={qty <= 1}
+                className="h-8 w-8 rounded-sm text-sm text-white/80 transition hover:bg-white/10 disabled:opacity-30"
+              >
+                −
+              </button>
+              <span className="min-w-[2rem] text-center text-sm text-white">
+                {qty}
+              </span>
+              <button
+                type="button"
+                aria-label="Increase quantity"
+                onClick={() => setQty((q) => Math.min(maxQty, q + 1))}
+                disabled={qty >= maxQty}
+                className="h-8 w-8 rounded-sm text-sm text-white/80 transition hover:bg-white/10 disabled:opacity-30"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <button
           type="button"
           disabled={disabled}
           onClick={() => setModalOpen(true)}
           className="w-full rounded-sm bg-white py-4 text-sm font-semibold uppercase tracking-[0.25em] text-black transition hover:bg-gold-200 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {sold ? "Sold Out" : "Buy Now"}
+          {sold
+            ? "Sold Out"
+            : qty > 1
+            ? `Buy ${qty} · ${formatPrice(subtotal)}`
+            : "Buy Now"}
         </button>
-        <p className="text-center text-[10px] uppercase tracking-[0.25em] text-white/35">
-          Crypto · Zelle · Cash App · Card · Apple Pay
-        </p>
 
-        <AddToCartButton product={product} />
+        <AddToCartButton product={product} quantity={qty} />
         <ChatWithUsLink />
       </div>
 
@@ -72,7 +112,10 @@ export function ProductPurchaseBlock({
               {product.brand ?? "Wrist Reserve"}
             </p>
             <p className="truncate font-display text-lg leading-tight text-white">
-              {formatPrice(product.price)}
+              {formatPrice(subtotal)}
+              {qty > 1 ? (
+                <span className="ml-2 text-xs text-white/50">× {qty}</span>
+              ) : null}
             </p>
           </div>
           <div className="w-40">
@@ -92,8 +135,8 @@ export function ProductPurchaseBlock({
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         product={product}
+        quantity={qty}
         availableRails={availableRails}
-        manualMethods={manualMethods}
       />
     </>
   );

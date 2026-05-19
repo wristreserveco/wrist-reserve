@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { logOrderEvent } from "@/lib/orders/events";
 import { decrementProductStock } from "@/lib/inventory";
+import { autoBuyLabelForOrder, isAutoShipEnabled } from "@/lib/shipping/autoship";
+import { logAuditEvent, auditContextFromRequest } from "@/lib/security/audit-log";
 
 export const runtime = "nodejs";
 
@@ -37,10 +39,22 @@ export async function POST(request: Request) {
     .from("orders")
     .update(basePayload)
     .eq("id", orderId)
-    .select("product_id, payment_status")
+    .select("product_id, payment_status, quantity")
     .single();
 
   if (updateRes.error && /verified_at/.test(updateRes.error.message)) {
+    updateRes = await service
+      .from("orders")
+      .update({ payment_status: newStatus })
+      .eq("id", orderId)
+      .select("product_id, payment_status, quantity")
+      .single();
+  }
+  // Older schema may lack `quantity` — re-select minimal columns.
+  if (
+    updateRes.error &&
+    /column|quantity|does not exist/i.test(updateRes.error.message)
+  ) {
     updateRes = await service
       .from("orders")
       .update({ payment_status: newStatus })
@@ -65,8 +79,33 @@ export async function POST(request: Request) {
     metadata: { email: user.email ?? null },
   });
 
+  await logAuditEvent({
+    service,
+    ...auditContextFromRequest(request, user),
+    kind: newStatus === "paid" ? "order.mark_paid" : "order.cancel",
+    targetKind: "order",
+    targetId: orderId,
+    message:
+      newStatus === "paid"
+        ? `Marked order ${orderId} as paid`
+        : `Cancelled order ${orderId}`,
+  });
+
   if (newStatus === "paid" && order?.product_id) {
-    await decrementProductStock(service, order.product_id);
+    const qty =
+      typeof (order as { quantity?: number }).quantity === "number" &&
+      (order as { quantity?: number }).quantity! > 0
+        ? (order as { quantity?: number }).quantity!
+        : 1;
+    await decrementProductStock(service, order.product_id, qty);
+
+    // Fire-and-forget auto label purchase. Never blocks the admin response —
+    // results land in order_events so the timeline tells the story.
+    if (isAutoShipEnabled()) {
+      void autoBuyLabelForOrder({ service, orderId }).catch((err) => {
+        console.error("[autoship] mark-paid handler:", err);
+      });
+    }
   }
 
   return NextResponse.json({ ok: true, status: newStatus });

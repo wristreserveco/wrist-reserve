@@ -9,6 +9,11 @@ export function parseMediaUrls(raw: unknown): string[] {
   return [];
 }
 
+/** True when the piece can be purchased on the storefront right now. */
+export function productIsShopBuyable(p: Product): boolean {
+  return !p.hidden && p.status === "available" && p.quantity > 0;
+}
+
 export function mapProduct(row: Record<string, unknown>): Product {
   const rawQty = row.quantity;
   const quantity =
@@ -41,11 +46,8 @@ export function mapProduct(row: Record<string, unknown>): Product {
     status: row.status === "sold" ? "sold" : "available",
     featured: Boolean(row.featured),
     on_wrist_spotlight: row.on_wrist_spotlight !== false,
+    hidden: row.hidden === true,
     created_at: String(row.created_at),
-    square_url:
-      row.square_url != null && String(row.square_url).trim() !== ""
-        ? String(row.square_url)
-        : null,
     tier: normaliseTier(row.tier),
   };
 }

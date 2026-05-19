@@ -6,7 +6,7 @@ values
     'Aurelius',
     12400,
     'Swiss automatic chronograph with hand-finished dial and exhibition caseback.',
-    '["https://images.unsplash.com/photo-1523170335258-f5ed11844a49?auto=format&fit=crop&w=1600&q=80"]'::jsonb,
+    '["https://upload.wikimedia.org/wikipedia/commons/8/81/Rolex_Datejust_126234.jpg"]'::jsonb,
     null,
     'available',
     true
@@ -16,7 +16,7 @@ values
     'Marin & Co.',
     8900,
     'Ceramic bezel, 300m depth rating, integrated bracelet.',
-    '["https://images.unsplash.com/photo-1614164185128-e4ec99c436d7?auto=format&fit=crop&w=1600&q=80"]'::jsonb,
+    '["https://upload.wikimedia.org/wikipedia/commons/c/cd/Rolex-Submariner.jpg"]'::jsonb,
     null,
     'available',
     true
@@ -26,7 +26,7 @@ values
     'Aurelius',
     15200,
     'Dual-time complication with jet-black dial and gold accents.',
-    '["https://images.unsplash.com/photo-1594534475808-b18fc33b045e?auto=format&fit=crop&w=1600&q=80"]'::jsonb,
+    '["https://upload.wikimedia.org/wikipedia/commons/8/85/Rolex_GMT_Master_II_-_16710_%28without_background%2C_cropped_to_casing%29.jpg"]'::jsonb,
     null,
     'sold',
     false

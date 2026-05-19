@@ -4,14 +4,13 @@ import { isSupabaseConfigured } from "@/lib/env";
 import { formatPrice } from "@/lib/products";
 import { OrderStatusControls } from "@/components/admin/OrderStatusControls";
 import { AdminOrdersSearch } from "@/components/admin/AdminOrdersSearch";
-import { makeMemoCode } from "@/lib/payments/manual";
+import { makeMemoCode } from "@/lib/orders/memo";
 
 export const dynamic = "force-dynamic";
 
 const METHOD_LABEL: Record<string, string> = {
   crypto: "Crypto",
-  manual: "Manual",
-  stripe: "Card",
+  paypal: "PayPal",
 };
 
 const STATUS_CLASS: Record<string, string> = {
@@ -65,7 +64,7 @@ export default async function AdminOrdersPage({
   let { data: orders, error } = await supabase
     .from("orders")
     .select(
-      "id, product_id, email, amount, created_at, payment_method, payment_status, payment_ref, customer_name, customer_phone, proof_url, verified_at, shipped_at, tracking_number"
+      "id, product_id, email, amount, created_at, payment_method, payment_status, payment_ref, customer_name, customer_phone, verified_at, shipped_at, tracking_number"
     )
     .order("created_at", { ascending: false })
     .limit(500);
@@ -170,12 +169,11 @@ export default async function AdminOrdersPage({
             ) : (
               filtered.map((o) => {
                 const status = (o.payment_status ?? "paid") as string;
-                const method = (o.payment_method ?? "stripe") as string;
+                const method = (o.payment_method ?? "paypal") as string;
                 const memo = makeMemoCode(o.id);
                 const age = Date.now() - new Date(o.created_at).getTime();
                 const ageHours = age / 3600000;
                 const pendingAging = status === "pending" && ageHours > 24;
-                const proofUrl = (o as Record<string, unknown>).proof_url;
                 const shippedAt = (o as Record<string, unknown>).shipped_at;
 
                 return (
@@ -210,14 +208,7 @@ export default async function AdminOrdersPage({
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-col">
-                        <span>{METHOD_LABEL[method] ?? method}</span>
-                        {method === "manual" && o.payment_ref ? (
-                          <span className="text-xs text-white/45">
-                            {o.payment_ref}
-                          </span>
-                        ) : null}
-                      </div>
+                      <span>{METHOD_LABEL[method] ?? method}</span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -228,14 +219,6 @@ export default async function AdminOrdersPage({
                         >
                           {status}
                         </span>
-                        {proofUrl ? (
-                          <span
-                            title="Proof uploaded"
-                            className="rounded-full border border-emerald-400/30 bg-emerald-400/5 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-200"
-                          >
-                            📎
-                          </span>
-                        ) : null}
                         {shippedAt ? (
                           <span
                             title="Shipped"

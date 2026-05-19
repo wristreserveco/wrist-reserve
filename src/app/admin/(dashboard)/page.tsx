@@ -13,6 +13,7 @@ interface OrderRow {
   payment_method: string | null;
   payment_status: string | null;
   customer_name: string | null;
+  customer_phone: string | null;
   created_at: string;
 }
 
@@ -103,11 +104,23 @@ export default async function AdminDashboardPage() {
       .eq("payment_status", "pending"),
   ]);
 
-  const orderRows = (orders ?? []) as OrderRow[];
+  const orderRows = (orders ?? []) as (OrderRow & {
+    tracking_number?: string | null;
+    shipped_at?: string | null;
+  })[];
   const productRows = (products ?? []) as ProductRow[];
   const messageRows = (messages ?? []) as MessageRow[];
 
   const paid = orderRows.filter((o) => o.payment_status === "paid");
+  // Paid orders that don't have tracking yet → they're waiting for the
+  // admin to buy a label manually and send tracking. This is the new
+  // primary daily workflow now that auto-buy is off.
+  const awaitingFulfillment = paid
+    .filter((o) => !o.tracking_number)
+    .sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
   const revenueToday = paid
     .filter((o) => new Date(o.created_at) >= new Date(startToday))
     .reduce((s, o) => s + Number(o.amount), 0);
@@ -151,7 +164,13 @@ export default async function AdminDashboardPage() {
             · live overview
           </p>
         </div>
-        <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em]">
+        <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.18em]">
+          <Link
+            href="/admin/analytics"
+            className="rounded-sm border border-gold-400/45 bg-gold-400/10 px-3 py-2 text-gold-100 transition hover:border-gold-300 hover:bg-gold-400/15"
+          >
+            Visitor analytics
+          </Link>
           <Link
             href="/admin/products"
             className="rounded-sm border border-white/15 px-3 py-2 text-white/80 transition hover:border-white hover:text-white"
@@ -167,6 +186,102 @@ export default async function AdminDashboardPage() {
           </Link>
         </div>
       </div>
+
+      <Link
+        href="/admin/analytics"
+        className="mt-6 block overflow-hidden rounded-sm border border-gold-500/35 bg-gradient-to-r from-gold-500/[0.12] via-black to-black px-5 py-4 transition hover:border-gold-400/55 hover:from-gold-500/[0.18]"
+      >
+        <p className="text-[10px] uppercase tracking-[0.28em] text-gold-200/90">
+          Visitor analytics
+        </p>
+        <p className="mt-1 font-display text-xl text-white">Who’s on the site right now</p>
+        <p className="mt-2 max-w-xl text-xs leading-relaxed text-white/55">
+          Sessions, time on page, full click path, UTM/referrer, dwell + active-tab
+          time, CRM notes/tags, marketing opt-in, and CSV export — first-party data
+          in your Supabase project.
+        </p>
+        <p className="mt-3 text-[10px] uppercase tracking-[0.22em] text-gold-300/90">
+          Open visitor analytics →
+        </p>
+      </Link>
+
+      {/* ---------- Awaiting fulfillment alert ---------- */}
+      {awaitingFulfillment.length > 0 ? (
+        <div className="mt-6 overflow-hidden rounded-sm border-2 border-gold-400/40 bg-gradient-to-r from-gold-400/[0.08] via-gold-400/[0.03] to-transparent">
+          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-gold-200">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-gold-300" />
+                {awaitingFulfillment.length === 1
+                  ? "1 paid order awaiting fulfillment"
+                  : `${awaitingFulfillment.length} paid orders awaiting fulfillment`}
+              </p>
+              <p className="mt-2 text-sm text-white/80">
+                Buy the label manually on Shippo, then{" "}
+                <Link
+                  href="/admin/orders"
+                  className="text-gold-200 underline-offset-2 hover:underline"
+                >
+                  open the order
+                </Link>{" "}
+                and use <span className="text-white">Send tracking → buyer</span>{" "}
+                to mark shipped + notify them by email{" "}
+                {awaitingFulfillment.some((o) => Boolean(o.customer_phone))
+                  ? "+ SMS"
+                  : ""}
+                .
+              </p>
+            </div>
+            <Link
+              href="/admin/orders?status=paid"
+              className="shrink-0 rounded-sm bg-gold-400 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-black transition hover:bg-gold-300"
+            >
+              Fulfill now →
+            </Link>
+          </div>
+          <ul className="divide-y divide-white/5 border-t border-white/10">
+            {awaitingFulfillment.slice(0, 4).map((o) => {
+              const product = o.product_id
+                ? productById.get(o.product_id)
+                : null;
+              return (
+                <li key={o.id}>
+                  <Link
+                    href={`/admin/orders/${o.id}`}
+                    className="flex items-center justify-between gap-3 px-5 py-3 transition hover:bg-white/[0.03]"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-white">
+                        {product?.name ?? "Order"} ·{" "}
+                        <span className="text-gold-200">
+                          {formatPrice(Number(o.amount))}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] text-white/55">
+                        {o.customer_name ?? o.email ?? "no customer info"} ·{" "}
+                        Paid {formatRelative(o.created_at)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[10px] uppercase tracking-[0.22em] text-gold-300">
+                      Open →
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+            {awaitingFulfillment.length > 4 ? (
+              <li>
+                <Link
+                  href="/admin/orders?status=paid"
+                  className="block px-5 py-2.5 text-center text-[10px] uppercase tracking-[0.22em] text-white/55 transition hover:bg-white/[0.03] hover:text-white"
+                >
+                  + {awaitingFulfillment.length - 4} more →
+                </Link>
+              </li>
+            ) : null}
+          </ul>
+        </div>
+      ) : null}
 
       {/* ---------- Revenue ---------- */}
       <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -194,7 +309,14 @@ export default async function AdminDashboardPage() {
         />
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <Kpi
+          small
+          label="To fulfill"
+          value={String(awaitingFulfillment.length)}
+          sub="buy label + send tracking"
+          tone={awaitingFulfillment.length > 0 ? "warn" : undefined}
+        />
         <Kpi small label="Available" value={String(availableCount)} sub="in stock" />
         <Kpi small label="Sold" value={String(soldCount)} sub="all-time" />
         <Kpi

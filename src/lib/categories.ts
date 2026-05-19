@@ -1,5 +1,10 @@
 import type { Product } from "@/lib/types";
 
+/**
+ * Wikimedia Commons Rolex photography (same sourcing approach as category tiles).
+ * Fallback hero tiles link into shop search; live inventory replaces these when
+ * enough products match keywords.
+ */
 export interface WatchCategory {
   id: string;
   name: string;
@@ -8,36 +13,40 @@ export interface WatchCategory {
   keywords: string[];
   /** Full-bleed hero image. */
   heroImage: string;
-  /** Small thumbnails shown below (different references / sizes). */
-  fallbackVariants: { src: string; label?: string }[];
+  /** Small thumbnails — each must link somewhere shoppable. */
+  fallbackVariants: { src: string; label?: string; href: string }[];
+}
+
+const DJ = "https://upload.wikimedia.org/wikipedia/commons/8/81/Rolex_Datejust_126234.jpg";
+const SUB = "https://upload.wikimedia.org/wikipedia/commons/c/cd/Rolex-Submariner.jpg";
+const SEA = "https://upload.wikimedia.org/wikipedia/commons/8/80/Rolex_Sea_Dweller_16600.jpg";
+const YM = "https://upload.wikimedia.org/wikipedia/commons/thumb/2/28/Rolex_Yachtmaster_II_116680.JPG/1280px-Rolex_Yachtmaster_II_116680.JPG";
+const GMT = "https://upload.wikimedia.org/wikipedia/commons/8/85/Rolex_GMT_Master_II_-_16710_%28without_background%2C_cropped_to_casing%29.jpg";
+const DEEP = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Rolex_Deepsea_Sea-Dweller_116660_Blue_Dial_%27James_Cameron%27.jpg/1280px-Rolex_Deepsea_Sea-Dweller_116660_Blue_Dial_%27James_Cameron%27.jpg";
+const SKY = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Rolex_Sky-Dweller_in_oro_bianco.jpg/1280px-Rolex_Sky-Dweller_in_oro_bianco.jpg";
+const EXPLORER = "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Rolex_Explorer_II_%28edited%29.jpg/1280px-Rolex_Explorer_II_%28edited%29.jpg";
+const MILGAUSS = "https://upload.wikimedia.org/wikipedia/commons/8/88/Rolex_Milgauss_116400GV.jpg";
+const DAYTONA = "https://upload.wikimedia.org/wikipedia/commons/5/5b/Daytona116509.jpg";
+const DAYDATE =
+  "https://upload.wikimedia.org/wikipedia/commons/0/03/Rolex-day-date-champagne-dial-18k-yellow-gold-president-automatic-men_s-watch-118238cdp.webp";
+
+function shop(q: string): string {
+  return `/shop?q=${encodeURIComponent(q)}`;
 }
 
 export const WATCH_CATEGORIES: WatchCategory[] = [
   {
     id: "datejust",
-    name: "Date Just",
+    name: "Datejust",
     tagline:
       "The definitive timepiece — classic proportions in 26, 31, 36 and 41mm.",
     keywords: ["datejust", "date just", "date-just"],
-    heroImage:
-      "https://images.unsplash.com/photo-1509048191080-d2984bad6ae5?auto=format&fit=crop&w=2000&q=85",
+    heroImage: DJ,
     fallbackVariants: [
-      {
-        src: "https://images.unsplash.com/photo-1509048191080-d2984bad6ae5?auto=format&fit=crop&w=600&q=80",
-        label: "26mm",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1523170335258-f5ed11844a49?auto=format&fit=crop&w=600&q=80",
-        label: "31mm",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1548171915-e79a380a2a4b?auto=format&fit=crop&w=600&q=80",
-        label: "36mm",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1524805444758-089113d48a6d?auto=format&fit=crop&w=600&q=80",
-        label: "41mm",
-      },
+      { src: DJ, label: "26mm", href: shop("Rolex Datejust 26mm") },
+      { src: DJ, label: "31mm", href: shop("Rolex Datejust 31mm") },
+      { src: DJ, label: "36mm", href: shop("Rolex Datejust 36mm") },
+      { src: DJ, label: "41mm", href: shop("Rolex Datejust 41mm") },
     ],
   },
   {
@@ -45,25 +54,12 @@ export const WATCH_CATEGORIES: WatchCategory[] = [
     name: "Submariner",
     tagline: "The icon of dive — 300m rated, ceramic bezel, integrated presence.",
     keywords: ["submariner", "sub "],
-    heroImage:
-      "https://images.unsplash.com/photo-1614164185128-e4ec99c436d7?auto=format&fit=crop&w=2000&q=85",
+    heroImage: SUB,
     fallbackVariants: [
-      {
-        src: "https://images.unsplash.com/photo-1614164185128-e4ec99c436d7?auto=format&fit=crop&w=600&q=80",
-        label: "No-Date",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1587836374828-4dbafa94cf0e?auto=format&fit=crop&w=600&q=80",
-        label: "Date",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1524592094714-0f0654e20314?auto=format&fit=crop&w=600&q=80",
-        label: "Two-Tone",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1547996160-81dfa63595aa?auto=format&fit=crop&w=600&q=80",
-        label: "Gold",
-      },
+      { src: SUB, label: "No-Date", href: shop("Rolex Submariner no date") },
+      { src: SEA, label: "Date", href: shop("Rolex Submariner date") },
+      { src: YM, label: "Two-Tone", href: shop("Rolex Submariner two tone") },
+      { src: DAYDATE, label: "Gold", href: shop("Rolex Submariner gold") },
     ],
   },
   {
@@ -71,25 +67,12 @@ export const WATCH_CATEGORIES: WatchCategory[] = [
     name: "GMT-Master",
     tagline: "Dual-time travel — Pepsi, Batman, Root Beer and the new Sprite.",
     keywords: ["gmt"],
-    heroImage:
-      "https://images.unsplash.com/photo-1594534475808-b18fc33b045e?auto=format&fit=crop&w=2000&q=85",
+    heroImage: GMT,
     fallbackVariants: [
-      {
-        src: "https://images.unsplash.com/photo-1594534475808-b18fc33b045e?auto=format&fit=crop&w=600&q=80",
-        label: "Pepsi",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1623998021450-85c29c644e0d?auto=format&fit=crop&w=600&q=80",
-        label: "Batman",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1619134778706-7015533a6150?auto=format&fit=crop&w=600&q=80",
-        label: "Root Beer",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1606293459339-aa5d34a7b0e1?auto=format&fit=crop&w=600&q=80",
-        label: "Sprite",
-      },
+      { src: GMT, label: "Pepsi", href: shop("Rolex GMT-Master II Pepsi") },
+      { src: DEEP, label: "Batman", href: shop("Rolex GMT-Master II Batman") },
+      { src: SKY, label: "Root Beer", href: shop("Rolex GMT-Master II root beer") },
+      { src: MILGAUSS, label: "Sprite", href: shop("Rolex GMT-Master II Sprite") },
     ],
   },
   {
@@ -98,25 +81,12 @@ export const WATCH_CATEGORIES: WatchCategory[] = [
     tagline:
       "The chronograph — tachymeter bezel, racing heritage, vanishingly rare.",
     keywords: ["daytona"],
-    heroImage:
-      "https://images.unsplash.com/photo-1548171915-e79a380a2a4b?auto=format&fit=crop&w=2000&q=85",
+    heroImage: DAYTONA,
     fallbackVariants: [
-      {
-        src: "https://images.unsplash.com/photo-1548171915-e79a380a2a4b?auto=format&fit=crop&w=600&q=80",
-        label: "Panda",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1587838657229-9ccf97b0f4f4?auto=format&fit=crop&w=600&q=80",
-        label: "Reverse",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1555424221-250de2a343ac?auto=format&fit=crop&w=600&q=80",
-        label: "Platinum",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1580287212048-8b19a27bd54e?auto=format&fit=crop&w=600&q=80",
-        label: "Gold",
-      },
+      { src: DAYTONA, label: "Panda", href: shop("Rolex Daytona panda") },
+      { src: DAYTONA, label: "Reverse", href: shop("Rolex Daytona reverse panda") },
+      { src: EXPLORER, label: "Platinum", href: shop("Rolex Daytona platinum") },
+      { src: DAYDATE, label: "Gold", href: shop("Rolex Daytona gold") },
     ],
   },
   {
@@ -125,35 +95,28 @@ export const WATCH_CATEGORIES: WatchCategory[] = [
     tagline:
       "The President — full gold, fluted bezel, day spelled in full on the dial.",
     keywords: ["day-date", "day date", "daydate", "president"],
-    heroImage:
-      "https://images.unsplash.com/photo-1527254013938-a08d910d9ff7?auto=format&fit=crop&w=2000&q=85",
+    heroImage: DAYDATE,
     fallbackVariants: [
-      {
-        src: "https://images.unsplash.com/photo-1527254013938-a08d910d9ff7?auto=format&fit=crop&w=600&q=80",
-        label: "36mm",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1547996160-81dfa63595aa?auto=format&fit=crop&w=600&q=80",
-        label: "40mm",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1524805444758-089113d48a6d?auto=format&fit=crop&w=600&q=80",
-        label: "Yellow Gold",
-      },
-      {
-        src: "https://images.unsplash.com/photo-1509048191080-d2984bad6ae5?auto=format&fit=crop&w=600&q=80",
-        label: "White Gold",
-      },
+      { src: DAYDATE, label: "36mm", href: shop("Rolex Day-Date 36") },
+      { src: DAYDATE, label: "40mm", href: shop("Rolex Day-Date 40") },
+      { src: DJ, label: "Yellow Gold", href: shop("Rolex Day-Date yellow gold") },
+      { src: DJ, label: "White Gold", href: shop("Rolex Day-Date white gold") },
     ],
   },
 ];
+
+export interface HeroVariant {
+  src: string;
+  label?: string;
+  href: string;
+}
 
 export interface HeroCategorySlide {
   id: string;
   name: string;
   tagline: string;
   heroImage: string;
-  variants: { src: string; label?: string }[];
+  variants: HeroVariant[];
   shopHref: string;
   productCount: number;
 }
@@ -163,27 +126,62 @@ function productMatchesKeywords(product: Product, keywords: string[]): boolean {
   return keywords.some((k) => haystack.includes(k.toLowerCase()));
 }
 
+/**
+ * Pull a representative still image for a product, preferring real product
+ * photos but falling back to the auto-generated video poster when the
+ * admin only uploaded a wrist video. Returns null when nothing visual is
+ * available — caller can skip the product or fall back to stock art.
+ */
+function productCoverImage(p: Product): string | null {
+  const first = (p.media_urls ?? [])[0];
+  if (first) return first;
+  if (p.video_poster_url) return p.video_poster_url;
+  return null;
+}
+
 export function buildCategorySlides(products: Product[]): HeroCategorySlide[] {
   return WATCH_CATEGORIES.map((cat) => {
-    const matches = products.filter((p) => productMatchesKeywords(p, cat.keywords));
-    const productVariants = matches
-      .map((p) => {
-        const img = (p.media_urls ?? [])[0];
-        if (!img) return null;
-        return { src: img, label: p.name };
-      })
-      .filter((v): v is { src: string; label: string } => Boolean(v))
-      .slice(0, 4);
+    // Super Tier is its own funnel (shop toggle + homepage spotlight). Collection
+    // heroes are the "main line" — don't mix premium-tier inventory into Datejust etc.
+    const matches = products.filter(
+      (p) =>
+        p.tier !== "super_tier" && productMatchesKeywords(p, cat.keywords)
+    );
 
-    const variants =
-      productVariants.length >= 2
+    // Build variant tiles from real products first. We accept either a
+    // proper photo (media_urls[0]) or the auto-generated video poster — that
+    // way collections where the user only uploaded videos still show their
+    // actual inventory instead of falling back to Wikipedia stock art.
+    const productVariants: HeroVariant[] = [];
+    const seen = new Set<string>();
+    for (const p of matches) {
+      const img = productCoverImage(p);
+      if (!img || seen.has(img)) continue;
+      seen.add(img);
+      productVariants.push({
+        src: img,
+        label: p.name,
+        href: `/products/${p.id}`,
+      });
+      if (productVariants.length >= 4) break;
+    }
+
+    // Prefer 4 real product tiles. If we have fewer, top up with stock
+    // fallbacks so the row never looks empty. A single real tile is enough
+    // to anchor the row in actual inventory.
+    const variants: HeroVariant[] =
+      productVariants.length >= 4
+        ? productVariants
+        : productVariants.length >= 1
         ? [...productVariants, ...cat.fallbackVariants].slice(0, 4)
         : cat.fallbackVariants;
 
+    // Hero backdrop: also prefer a real product cover (photo or video
+    // poster) over the stock Wikipedia image.
     const heroImage =
-      matches.find((p) => p.featured && (p.media_urls ?? [])[0])?.media_urls?.[0] ||
-      matches[0]?.media_urls?.[0] ||
-      cat.heroImage;
+      productCoverImage(
+        matches.find((p) => p.featured) ?? matches[0] ?? ({} as Product)
+      ) || cat.heroImage;
 
     return {
       id: cat.id,

@@ -52,23 +52,36 @@ export async function GET(request: Request) {
   let cats = (data ?? []).map((row) => mapCategory(row as Record<string, unknown>));
 
   if (!all) {
+    // Only categories with at least one **in-stock** listing (buyable right now).
+    // `status !== sold` alone still included qty 0 “available” rows — that kept the
+    // whole seeded tree visible. Same rules as the shop “in stock” story.
     const { data: prodRows } = await supabase
       .from("products")
-      .select("category_id, status")
-      .neq("status", "sold")
+      .select("category_id, status, quantity")
+      .eq("status", "available")
       .not("category_id", "is", null);
 
     const liveCategoryIds = new Set<string>();
     for (const row of prodRows ?? []) {
-      const cid = (row as { category_id?: string | null }).category_id;
-      if (cid) liveCategoryIds.add(String(cid));
+      const r = row as {
+        category_id?: string | null;
+        quantity?: number | null;
+      };
+      const cid = r.category_id;
+      if (!cid) continue;
+      const rawQ = r.quantity;
+      const qty =
+        rawQ == null ? 1 : Math.max(0, Math.floor(Number(rawQ)));
+      if (qty <= 0) continue;
+      liveCategoryIds.add(String(cid));
     }
     cats = filterCategoriesWithInventory(cats, liveCategoryIds);
   }
 
   return NextResponse.json(cats, {
     headers: {
-      "Cache-Control": "public, max-age=30, s-maxage=60",
+      // Nav must never serve a stale full tree from edge/browser cache.
+      "Cache-Control": "private, no-store, max-age=0",
     },
   });
 }

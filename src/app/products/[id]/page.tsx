@@ -3,17 +3,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProductGallery } from "@/components/ProductGallery";
 import { ProductPurchaseBlock } from "@/components/ProductPurchaseBlock";
+import { ProductShareButton } from "@/components/ProductShareButton";
 import { TrustBadges } from "@/components/TrustBadges";
 import { ProductReviews } from "@/components/ProductReviews";
 import { createClient } from "@/lib/supabase/server";
 import {
   isSupabaseConfigured,
-  isStripeConfigured,
   isCryptoConfigured,
-  isManualPaymentConfigured,
-  getManualPaymentConfig,
+  isPaypalConfigured,
 } from "@/lib/env";
+import type { Rail } from "@/components/PaymentMethodModal";
 import { formatPrice, mapProduct, parseMediaUrls } from "@/lib/products";
+import { TIER_META } from "@/lib/tiers";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +24,41 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!isSupabaseConfigured()) {
-    return { title: "Product | Wrist Reserve" };
+    return { title: "Product" };
   }
   const supabase = await createClient();
-  const { data } = await supabase.from("products").select("name").eq("id", params.id).single();
-  if (!data?.name) return { title: "Product | Wrist Reserve" };
-  return { title: `${data.name} | Wrist Reserve` };
+  const { data } = await supabase
+    .from("products")
+    .select("name, brand, model, price, description, media_urls, hidden")
+    .eq("id", params.id)
+    .single();
+  if (!data?.name || data.hidden === true) {
+    return { title: "Product" };
+  }
+
+  const subject = [data.brand, data.model].filter(Boolean).join(" ");
+  const title = subject ? `${data.name} — ${subject}` : data.name;
+  const description = data.description
+    ? String(data.description).split("\n")[0].slice(0, 220)
+    : `Authenticated ${subject || "luxury timepiece"} from Wrist Reserve — affordable, insured worldwide shipping.`;
+  const images = parseMediaUrls(data.media_urls);
+
+  return {
+    title,
+    description,
+    openGraph: {
+      type: "website", // schema.org "product" is not in next/Metadata's union
+      title,
+      description,
+      images: images.slice(0, 4).map((url) => ({ url })),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: images[0] ? [images[0]] : undefined,
+    },
+  };
 }
 
 export default async function ProductPage({ params }: Props) {
@@ -55,17 +85,73 @@ export default async function ProductPage({ params }: Props) {
   }
 
   const product = mapProduct(row as Record<string, unknown>);
+  if (product.hidden) {
+    notFound();
+  }
   const images = parseMediaUrls(product.media_urls);
   const sold = product.status === "sold";
 
-  const availableRails: ("crypto" | "manual" | "stripe")[] = [];
+  // Load approved reviews; if the reviews table isn't migrated yet, silently
+  // fall back to an empty list so the page still renders.
+  let reviews: import("@/lib/types").ProductReview[] = [];
+  try {
+    const { data: reviewRows, error: reviewErr } = await supabase
+      .from("product_reviews")
+      .select("*")
+      .eq("product_id", product.id)
+      .eq("approved", true)
+      .order("created_at", { ascending: false })
+      .limit(60);
+    if (!reviewErr && reviewRows) {
+      reviews = reviewRows as import("@/lib/types").ProductReview[];
+    }
+  } catch {
+    // Table doesn't exist yet — fine.
+  }
+
+  // Order matters: PayPal first (preferred for buyer trust + protection),
+  // crypto second. The modal renders these in the order we provide.
+  const availableRails: Rail[] = [];
+  if (isPaypalConfigured()) availableRails.push("paypal");
   if (isCryptoConfigured()) availableRails.push("crypto");
-  if (isManualPaymentConfigured()) availableRails.push("manual");
-  if (isStripeConfigured()) availableRails.push("stripe");
-  const manualMethods = getManualPaymentConfig().enabled;
+
+  // Product JSON-LD — populates Google Shopping cards, share-link previews,
+  // and AI assistants with structured pricing/availability/brand data.
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "";
+  const productJsonLd: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description:
+      product.description?.split("\n")[0]?.slice(0, 500) ||
+      `Authenticated ${[product.brand, product.model].filter(Boolean).join(" ")} from Wrist Reserve.`,
+    sku: product.id,
+    image: images,
+    ...(product.brand
+      ? { brand: { "@type": "Brand", name: product.brand } }
+      : {}),
+    ...(product.model ? { model: product.model } : {}),
+    offers: {
+      "@type": "Offer",
+      url: `${siteUrl}/products/${product.id}`,
+      price: product.price.toFixed(2),
+      priceCurrency: "USD",
+      availability: sold
+        ? "https://schema.org/SoldOut"
+        : product.quantity > 0
+        ? "https://schema.org/InStock"
+        : "https://schema.org/OutOfStock",
+      itemCondition: "https://schema.org/UsedCondition",
+      seller: { "@type": "Organization", name: "Wrist Reserve" },
+    },
+  };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
+      />
       <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
         <ProductGallery
           images={images}
@@ -77,12 +163,31 @@ export default async function ProductPage({ params }: Props) {
         />
 
         <div>
-          {product.brand || product.model ? (
-            <p className="text-xs uppercase tracking-[0.3em] text-white/40">
-              {[product.brand, product.model].filter(Boolean).join(" · ")}
+          {product.brand || product.model || product.tier === "super_tier" ? (
+            <p className="text-xs uppercase tracking-[0.3em]">
+              {product.tier === "super_tier" ? (
+                <>
+                  <span className="text-gold-200/95">{TIER_META.super_tier.label}</span>
+                  {product.brand || product.model ? (
+                    <>
+                      <span className="text-white/25"> · </span>
+                      <span className="text-white/40">
+                        {[product.brand, product.model].filter(Boolean).join(" · ")}
+                      </span>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <span className="text-white/40">
+                  {[product.brand, product.model].filter(Boolean).join(" · ")}
+                </span>
+              )}
             </p>
           ) : null}
-          <h1 className="mt-3 font-display text-4xl text-white sm:text-5xl">{product.name}</h1>
+          <div className="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+            <h1 className="font-display text-4xl text-white sm:text-5xl">{product.name}</h1>
+            <ProductShareButton productName={product.name} />
+          </div>
           <div className="mt-6 flex flex-wrap items-center gap-4">
             <p className="font-display text-3xl text-white">{formatPrice(product.price)}</p>
             {sold || product.quantity <= 0 ? (
@@ -119,14 +224,13 @@ export default async function ProductPage({ params }: Props) {
           <ProductPurchaseBlock
             product={product}
             availableRails={availableRails}
-            manualMethods={manualMethods}
           />
 
           <TrustBadges />
         </div>
       </div>
 
-      <ProductReviews />
+      <ProductReviews productId={product.id} initialReviews={reviews} />
     </div>
   );
 }

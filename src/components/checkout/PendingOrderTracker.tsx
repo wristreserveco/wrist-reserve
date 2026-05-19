@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { PaymentQR } from "@/components/payments/PaymentQR";
+/**
+ * Live status panel shown on /checkout/pending/[orderId].
+ *
+ * Both PayPal and Crypto checkouts redirect here. PayPal lands `paid` almost
+ * immediately (capture happens server-side on /checkout/paypal/return);
+ * Crypto stays `pending` until NOWPayments fires the IPN. We poll every
+ * few seconds so the page reacts the moment funds clear.
+ */
+
+import { useEffect, useState } from "react";
 import { formatEvent, type OrderEventKind } from "@/lib/orders/events";
 
 interface TimelineEvent {
@@ -15,21 +23,16 @@ interface TimelineEvent {
 interface StatusResponse {
   id: string;
   status: "pending" | "paid" | "cancelled" | "expired" | "refunded";
-  method: "crypto" | "manual" | "stripe" | null;
-  methodRef: string | null;
+  method: "crypto" | "paypal" | null;
   amount: number;
   amountDisplay: string;
   memo: string;
   productName: string | null;
   customerName: string | null;
-  handle: string | null;
-  deepLink: string | null;
-  qrValue: string | null;
-  qrImageUrl: string | null;
-  proofUrl: string | null;
-  proofMime: string | null;
   trackingNumber: string | null;
   trackingCarrier: string | null;
+  trackingUrl: string | null;
+  trackingStatus: string | null;
   shippedAt: string | null;
   events: TimelineEvent[];
 }
@@ -48,9 +51,6 @@ function timeShort(iso: string): string {
 
 export function PendingOrderTracker({ orderId }: { orderId: string }) {
   const [data, setData] = useState<StatusResponse | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,34 +76,6 @@ export function PendingOrderTracker({ orderId }: { orderId: string }) {
     };
   }, [orderId]);
 
-  async function uploadProof(file: File) {
-    setUploadError(null);
-    if (file.size > 15 * 1024 * 1024) {
-      setUploadError("File is too large (15MB max).");
-      return;
-    }
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch(`/api/orders/${orderId}/proof`, {
-        method: "POST",
-        body: form,
-      });
-      const out = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        error?: string;
-      };
-      if (!res.ok) {
-        setUploadError(out.error ?? "Upload failed.");
-      }
-    } catch {
-      setUploadError("Upload failed. Try again.");
-    } finally {
-      setUploading(false);
-    }
-  }
-
   const status = data?.status ?? "pending";
 
   return (
@@ -124,10 +96,12 @@ export function PendingOrderTracker({ orderId }: { orderId: string }) {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-gold-400" />
               </span>
               <span className="text-white">
-                Watching for your payment
+                {data?.method === "crypto"
+                  ? "Awaiting on-chain confirmation"
+                  : "Awaiting payment confirmation"}
                 {data?.memo ? (
                   <>
-                    {" "}with memo{" "}
+                    {" "}— ref{" "}
                     <span className="rounded-sm bg-white/10 px-1.5 py-0.5 font-mono text-xs text-white">
                       {data.memo}
                     </span>
@@ -136,58 +110,10 @@ export function PendingOrderTracker({ orderId }: { orderId: string }) {
               </span>
             </div>
             <p className="text-xs text-white/50">
-              We verify and ship within 2 hours during business hours (9am–11pm ET).
-              You&rsquo;ll receive a shipping confirmation email the moment the funds
-              clear — this page also updates live.
+              {data?.method === "crypto"
+                ? "Crypto payments usually confirm in under 10 minutes. We'll ship the moment your transaction is final."
+                : "We ship within 2 hours of confirmation during business hours (9am–11pm ET). This page updates live."}
             </p>
-
-            {data &&
-            data.method === "manual" &&
-            data.methodRef === "square" &&
-            data.deepLink ? (
-              <a
-                href={data.deepLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 flex w-full items-center justify-center rounded-sm bg-white py-3 text-xs font-semibold uppercase tracking-[0.22em] text-black transition hover:bg-gold-200"
-              >
-                Pay {data.amountDisplay} with card via Square →
-              </a>
-            ) : null}
-
-            {data && data.method === "manual" && (data.qrValue || data.qrImageUrl) ? (
-              <div className="mt-5 flex flex-col items-start gap-4 rounded-sm border border-white/10 bg-black/40 p-4 sm:flex-row">
-                <PaymentQR
-                  value={data.qrValue}
-                  imageUrl={data.qrImageUrl}
-                  caption={
-                    data.methodRef === "cashapp"
-                      ? "Scan with phone camera"
-                      : "Scan with your bank app"
-                  }
-                  size={140}
-                />
-                <div className="space-y-1.5 text-xs">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/40">
-                    Need to resend?
-                  </p>
-                  {data.handle ? (
-                    <p className="text-white">
-                      <span className="text-white/50">To:</span>{" "}
-                      <span className="font-mono">{data.handle}</span>
-                    </p>
-                  ) : null}
-                  <p className="text-white">
-                    <span className="text-white/50">Amount:</span>{" "}
-                    {data.amountDisplay}
-                  </p>
-                  <p className="text-white">
-                    <span className="text-white/50">Memo:</span>{" "}
-                    <span className="font-mono">{data.memo}</span>
-                  </p>
-                </div>
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -202,16 +128,33 @@ export function PendingOrderTracker({ orderId }: { orderId: string }) {
               </span>
             </div>
             {data?.trackingNumber ? (
-              <p className="text-sm text-white/70">
-                <span className="text-white/50">Tracking:</span>{" "}
-                <span className="font-mono text-white">
-                  {data.trackingCarrier ? `${data.trackingCarrier} · ` : ""}
-                  {data.trackingNumber}
-                </span>
-              </p>
+              <div className="space-y-1">
+                <p className="text-sm text-white/70">
+                  <span className="text-white/50">Tracking:</span>{" "}
+                  <span className="font-mono text-white">
+                    {data.trackingCarrier ? `${data.trackingCarrier} · ` : ""}
+                    {data.trackingNumber}
+                  </span>
+                </p>
+                {data.trackingUrl ? (
+                  <a
+                    href={data.trackingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block text-xs text-gold-300 underline decoration-dotted hover:text-gold-200"
+                  >
+                    Track shipment ↗
+                  </a>
+                ) : null}
+                {data.trackingStatus && data.trackingStatus !== "PRE_TRANSIT" ? (
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-white/40">
+                    {data.trackingStatus.replace(/_/g, " ")}
+                  </p>
+                ) : null}
+              </div>
             ) : (
               <p className="text-xs text-white/50">
-                Tracked + insured via FedEx Priority. Tracking number arrives by email
+                Tracked + insured worldwide. Tracking number arrives by email
                 within a few hours.
               </p>
             )}
@@ -226,84 +169,7 @@ export function PendingOrderTracker({ orderId }: { orderId: string }) {
         ) : null}
       </div>
 
-      {/* -------- Proof of payment upload (manual orders only, while pending) -------- */}
-      {status === "pending" && data?.method === "manual" ? (
-        <div className="rounded-sm border border-white/10 bg-zinc-950/60 p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-gold-400/90">
-                Speed things up
-              </p>
-              <p className="mt-2 text-sm font-medium text-white">
-                Attach your payment screenshot
-              </p>
-              <p className="mt-1 text-xs text-white/50">
-                Drop the Zelle / Cash App receipt here so we can cross-check and release
-                your watch faster. JPG, PNG, or PDF · 15MB max.
-              </p>
-            </div>
-          </div>
-
-          {data.proofUrl ? (
-            <div className="mt-5 flex items-center gap-4 rounded-sm border border-emerald-400/30 bg-emerald-400/5 p-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">
-                ✓
-              </div>
-              <div className="min-w-0 flex-1 text-sm">
-                <p className="text-white">Proof received — we&rsquo;ll review within minutes.</p>
-                <a
-                  href={data.proofUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-gold-300 underline decoration-dotted hover:text-gold-200"
-                >
-                  View uploaded file ↗
-                </a>
-              </div>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="rounded-sm border border-white/15 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-white/70 transition hover:border-white hover:text-white disabled:opacity-40"
-              >
-                Replace
-              </button>
-            </div>
-          ) : (
-            <div className="mt-5 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="rounded-sm bg-white px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-black transition hover:bg-gold-200 disabled:opacity-40"
-              >
-                {uploading ? "Uploading…" : "Upload receipt"}
-              </button>
-              <p className="text-[10px] text-white/40">
-                Optional, but recommended.
-              </p>
-            </div>
-          )}
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif,application/pdf"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = "";
-              if (f) void uploadProof(f);
-            }}
-          />
-
-          {uploadError ? (
-            <p className="mt-3 text-xs text-red-400/90">{uploadError}</p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* -------- Timeline -------- */}
+      {/* Timeline */}
       {data && data.events.length > 0 ? (
         <div className="rounded-sm border border-white/10 bg-zinc-950/40 p-5">
           <p className="text-[10px] uppercase tracking-[0.22em] text-white/45">
@@ -338,10 +204,8 @@ export function PendingOrderTracker({ orderId }: { orderId: string }) {
 
 function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
-    pending:
-      "border-gold-400/40 bg-gold-400/10 text-gold-200",
-    paid:
-      "border-emerald-400/40 bg-emerald-400/10 text-emerald-200",
+    pending: "border-gold-400/40 bg-gold-400/10 text-gold-200",
+    paid: "border-emerald-400/40 bg-emerald-400/10 text-emerald-200",
     cancelled: "border-red-400/40 bg-red-400/10 text-red-200",
     expired: "border-red-400/40 bg-red-400/10 text-red-200",
     refunded: "border-white/20 bg-white/5 text-white/60",

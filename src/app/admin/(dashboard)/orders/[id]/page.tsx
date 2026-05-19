@@ -3,10 +3,11 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
 import { formatPrice } from "@/lib/products";
-import { makeMemoCode, MANUAL_METHOD_LABEL, type ManualMethod } from "@/lib/payments/manual";
+import { makeMemoCode } from "@/lib/orders/memo";
 import { AdminOrderActions } from "@/components/admin/AdminOrderActions";
 import { OrderTimeline } from "@/components/admin/OrderTimeline";
 import { CopyButtonClient } from "@/components/admin/CopyButtonClient";
+import { SendTrackingPanel } from "@/components/admin/SendTrackingPanel";
 import type { OrderEventRow } from "@/lib/orders/events";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +26,7 @@ const STATUS_CLASS: Record<string, string> = {
 
 const METHOD_LABEL: Record<string, string> = {
   crypto: "Crypto",
-  manual: "Manual",
-  stripe: "Card",
+  paypal: "PayPal",
 };
 
 export default async function AdminOrderDetailPage({ params }: Props) {
@@ -38,7 +38,7 @@ export default async function AdminOrderDetailPage({ params }: Props) {
   let { data: order, error } = await supabase
     .from("orders")
     .select(
-      "id, product_id, email, amount, created_at, payment_method, payment_status, payment_ref, customer_name, customer_phone, notes, shipping_address, proof_url, proof_mime, proof_uploaded_at, verified_at, shipped_at, tracking_number, tracking_carrier, admin_notes"
+      "id, product_id, email, amount, quantity, created_at, payment_method, payment_status, payment_ref, customer_name, customer_phone, notes, shipping_address, verified_at, shipped_at, tracking_number, tracking_carrier, tracking_url, tracking_status, shippo_label_url, shippo_transaction_id, shipping_service, admin_notes"
     )
     .eq("id", params.id)
     .single();
@@ -78,18 +78,11 @@ export default async function AdminOrderDetailPage({ params }: Props) {
   }
 
   const status = order.payment_status ?? "pending";
-  const method = order.payment_method ?? "manual";
+  const method = order.payment_method ?? "paypal";
   const memo = makeMemoCode(order.id);
   const amount = Number(order.amount);
-  const manualRef = (order.payment_ref as ManualMethod | null) ?? null;
-  const proofUrl =
-    typeof (order as Record<string, unknown>).proof_url === "string"
-      ? ((order as Record<string, unknown>).proof_url as string)
-      : null;
-  const proofMime =
-    typeof (order as Record<string, unknown>).proof_mime === "string"
-      ? ((order as Record<string, unknown>).proof_mime as string)
-      : null;
+  const paymentRef =
+    typeof order.payment_ref === "string" ? order.payment_ref : null;
   const shippingAddress =
     typeof (order as Record<string, unknown>).shipping_address === "string"
       ? ((order as Record<string, unknown>).shipping_address as string)
@@ -154,7 +147,6 @@ export default async function AdminOrderDetailPage({ params }: Props) {
           </p>
           <p className="mt-1 text-xs text-white/45">
             {METHOD_LABEL[method] ?? method}
-            {manualRef ? ` · ${MANUAL_METHOD_LABEL[manualRef] ?? manualRef}` : ""}
           </p>
         </div>
       </div>
@@ -175,49 +167,22 @@ export default async function AdminOrderDetailPage({ params }: Props) {
               <Field label="Amount" value={formatPrice(amount)} copyable={String(amount)} />
               <Field
                 label="Method"
-                value={
-                  manualRef
-                    ? MANUAL_METHOD_LABEL[manualRef] ?? manualRef
-                    : METHOD_LABEL[method] ?? method
-                }
+                value={METHOD_LABEL[method] ?? method}
               />
               <Field
-                label="Proof of payment"
+                label="Processor reference"
                 value={
-                  proofUrl ? (
-                    <a
-                      href={proofUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-gold-300 underline decoration-dotted hover:text-gold-200"
-                    >
-                      View receipt ↗
-                    </a>
+                  paymentRef ? (
+                    <span className="break-all font-mono text-xs text-white/85">
+                      {paymentRef}
+                    </span>
                   ) : (
-                    <span className="text-white/40">Not uploaded</span>
+                    <span className="text-white/40">—</span>
                   )
                 }
+                copyable={paymentRef ?? undefined}
               />
             </dl>
-
-            {proofUrl && proofMime?.startsWith("image/") ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={proofUrl}
-                alt="Payment proof"
-                className="mt-5 max-h-[420px] rounded-sm border border-white/10 bg-black object-contain"
-              />
-            ) : null}
-            {proofUrl && proofMime === "application/pdf" ? (
-              <a
-                href={proofUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-5 inline-flex items-center gap-2 rounded-sm border border-white/15 px-3 py-2 text-xs uppercase tracking-[0.2em] text-white/80 hover:border-white hover:text-white"
-              >
-                Open PDF receipt ↗
-              </a>
-            ) : null}
           </section>
 
           <section className="rounded-sm border border-white/10 bg-zinc-950/70 p-6">
@@ -267,6 +232,34 @@ export default async function AdminOrderDetailPage({ params }: Props) {
             verifiedAt={verifiedAt}
             shippedAt={shippedAt}
           />
+
+          {/* Manual-fulfillment workflow: paste tracking + upload label image,
+              one click saves it on the order AND emails the buyer. Works
+              regardless of whether Shippo auto-buy is configured. */}
+          <SendTrackingPanel
+            orderId={order.id}
+            status={status as string}
+            customerEmail={order.email ?? null}
+            customerName={order.customer_name ?? null}
+            customerPhone={order.customer_phone ?? null}
+            existingTrackingNumber={trackingNumber}
+            existingCarrier={trackingCarrier}
+            existingLabelUrl={
+              typeof (order as Record<string, unknown>).shippo_label_url ===
+              "string"
+                ? ((order as Record<string, unknown>).shippo_label_url as string)
+                : null
+            }
+            existingTrackingUrl={
+              typeof (order as Record<string, unknown>).tracking_url === "string"
+                ? ((order as Record<string, unknown>).tracking_url as string)
+                : null
+            }
+          />
+
+          {/* Shippo auto-buy panel intentionally removed — owner runs a
+              fully manual fulfilment workflow now. The Send-tracking panel
+              above is the single source of truth for shipping. */}
         </div>
 
         {/* ---------- Timeline ---------- */}

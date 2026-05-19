@@ -2,13 +2,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * Decrement stock for a product when an order is marked paid.
+ *
+ * `qty` is how many units were bought (default 1 for legacy callers).
+ * Clamped to the current stock — never goes below zero.
  * Falls back gracefully if the `quantity` column hasn't been migrated yet —
  * in that case it just flips status to "sold".
  */
 export async function decrementProductStock(
   supabase: SupabaseClient,
-  productId: string
+  productId: string,
+  qty: number = 1
 ): Promise<void> {
+  const units = Math.max(1, Math.floor(Number.isFinite(qty) ? qty : 1));
+
   const { data: prod } = await supabase
     .from("products")
     .select("quantity, status")
@@ -19,7 +25,7 @@ export async function decrementProductStock(
     prod && typeof prod.quantity === "number" ? prod.quantity : null;
 
   if (currentQty !== null) {
-    const nextQty = Math.max(0, currentQty - 1);
+    const nextQty = Math.max(0, currentQty - units);
     await supabase
       .from("products")
       .update({

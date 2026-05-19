@@ -227,7 +227,7 @@ export function AdminOrderActions({
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Zelle received @ 2:14pm, BoA ending 4421. Called buyer to confirm…"
+          placeholder="PayPal capture verified · ID 8XK… · Buyer confirmed by email."
           rows={3}
           className="w-full rounded-sm border border-white/10 bg-black px-3 py-2 text-sm normal-case tracking-normal text-white outline-none focus:ring-1 focus:ring-gold-500/40"
         />

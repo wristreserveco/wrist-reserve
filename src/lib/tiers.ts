@@ -35,8 +35,8 @@ export interface TierMeta {
   /**
    * If `false`, this tier is never advertised or shown as a filter on the
    * storefront — it only exists in admin UIs as an organisational label.
-   * We use this for the default tier so customers don't see "Standard" /
-   * "Classic" chips next to the premium line.
+   * We use this for the default tier so customers don't see a second "line"
+   * name next to Super Tier — only Super Tier is badged on the site.
    */
   publiclyAdvertised: boolean;
 }
@@ -44,10 +44,10 @@ export interface TierMeta {
 export const TIER_META: Record<ProductTier, TierMeta> = {
   classic: {
     key: "classic",
-    // Internal label only — customers never see this word. We use "Standard"
-    // so the admin dropdown has *something* readable for non-Super-Tier items.
-    label: "Standard",
-    plural: "Standard catalog",
+    // Admin-only — not a customer-facing collection name. Avoids reading
+    // like a competing "line" vs Super Tier (which is the only tier we badge).
+    label: "Catalog",
+    plural: "Catalog",
     tagline: "The everyday catalog",
     blurb:
       "Our everyday catalog. Concierge-grade presentation, authenticated in-house, shipped worldwide.",
@@ -80,6 +80,11 @@ export const PUBLIC_TIERS: ProductTier[] = PRODUCT_TIERS.filter(
  * applied yet or if an old share link is hit.
  */
 export function normaliseTier(v: unknown): ProductTier {
-  if (v === "super_tier" || v === "reserve") return "super_tier";
+  if (v == null || v === "") return DEFAULT_TIER;
+  const s = String(v)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (s === "super_tier" || s === "reserve") return "super_tier";
   return "classic";
 }

@@ -12,19 +12,35 @@ interface Props {
  * Copies the public storefront URL for a product to the clipboard.
  * Tuned for the "paste into Instagram / DMs" workflow.
  */
-export function ShareProductButton({ productId, className, label = "Share" }: Props) {
+export function ShareProductButton({ productId, className, label = "Copy link" }: Props) {
   const [copied, setCopied] = useState(false);
 
+  const url =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/products/${productId}`
+      : `/products/${productId}`;
+
   async function onClick() {
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/products/${productId}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      setTimeout(() => setCopied(false), 1800);
     } catch {
-      // ignore — clipboard may be blocked in certain webviews.
+      // Fallback for older browsers / locked-down webviews.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+      } catch {
+        /* give up silently */
+      }
     }
   }
 
@@ -36,9 +52,9 @@ export function ShareProductButton({ productId, className, label = "Share" }: Pr
         className ??
         "rounded-sm border border-white/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.18em] text-white/70 transition hover:border-white/30 hover:text-white"
       }
-      title="Copy public product link"
+      title={`Click to copy: ${url}`}
     >
-      {copied ? "Link copied" : label}
+      {copied ? "Link copied ✓" : label}
     </button>
   );
 }

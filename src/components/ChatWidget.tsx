@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, isBrowserSupabaseReady } from "@/lib/supabase/client";
+import type { Session } from "@supabase/supabase-js";
 import type { MessageRow, AttachmentKind } from "@/lib/types";
 import { SeenStatus, SendingStatus, SentStatus } from "@/components/chat/SeenStatus";
 import {
@@ -59,6 +60,7 @@ export function ChatWidget() {
   const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState<LightboxMedia | null>(null);
+  const [verificationSent, setVerificationSent] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,7 +68,6 @@ export function ChatWidget() {
   useEffect(() => {
     const stored = loadProfile();
     if (stored) {
-      setProfile(stored);
       setNameInput(stored.name);
       setEmailInput(stored.email);
     }
@@ -88,6 +89,58 @@ export function ChatWidget() {
       /* silent */
     }
   }, []);
+
+  const establishFromSession = useCallback(
+    async (session: Session) => {
+      const email = session.user.email;
+      if (!email) return;
+      const meta = session.user.user_metadata as { full_name?: string };
+      const name =
+        meta.full_name?.trim() ||
+        loadProfile()?.name ||
+        email.split("@")[0] ||
+        "Guest";
+      const next: ChatProfile = { name, email };
+      try {
+        await fetch("/api/chat/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+          credentials: "include",
+        });
+        localStorage.setItem(PROFILE_KEY, JSON.stringify(next));
+        setProfile(next);
+        setNameInput(name);
+        setEmailInput(email);
+        setVerificationSent(false);
+        await loadHistory();
+      } catch {
+        setError("Could not sync your verified session.");
+      }
+    },
+    [loadHistory]
+  );
+
+  useEffect(() => {
+    if (!isBrowserSupabaseReady()) return;
+    const supabase = createClient();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (
+        session?.user?.email &&
+        (event === "SIGNED_IN" || event === "INITIAL_SESSION")
+      ) {
+        void establishFromSession(session);
+      }
+      if (event === "SIGNED_OUT") {
+        setProfile(null);
+        setMessages([]);
+        setVerificationSent(false);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [establishFromSession]);
 
   const markAdminMessagesRead = useCallback(async () => {
     try {
@@ -144,30 +197,39 @@ export function ChatWidget() {
     [nameInput, emailInput]
   );
 
-  async function startChat(e: React.FormEvent) {
+  async function sendVerificationEmail(e: React.FormEvent) {
     e.preventDefault();
     if (!canStart) {
-      setError("Enter a valid name and email.");
+      setError("Enter your full name and a valid email.");
+      return;
+    }
+    if (!isBrowserSupabaseReady()) {
+      setError("Chat sign-in is not configured (missing Supabase env).");
       return;
     }
     setError(null);
     setLoadingProfile(true);
-    const next: ChatProfile = {
-      name: nameInput.trim(),
-      email: emailInput.trim(),
-    };
     try {
-      await fetch("/api/chat/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
-        credentials: "include",
+      const supabase = createClient();
+      const origin = window.location.origin;
+      const { error: otpErr } = await supabase.auth.signInWithOtp({
+        email: emailInput.trim(),
+        options: {
+          emailRedirectTo: `${origin}/auth/callback?next=/`,
+          data: { full_name: nameInput.trim() },
+        },
       });
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(next));
-      setProfile(next);
-      await loadHistory();
+      if (otpErr) throw otpErr;
+      localStorage.setItem(
+        PROFILE_KEY,
+        JSON.stringify({
+          name: nameInput.trim(),
+          email: emailInput.trim(),
+        })
+      );
+      setVerificationSent(true);
     } catch {
-      setError("Could not start chat.");
+      setError("Could not send verification email. Try again.");
     } finally {
       setLoadingProfile(false);
     }
@@ -308,10 +370,20 @@ export function ChatWidget() {
     }
   }
 
-  function resetProfile() {
+  async function resetProfile() {
     localStorage.removeItem(PROFILE_KEY);
     setProfile(null);
     setMessages([]);
+    setVerificationSent(false);
+    try {
+      await fetch("/api/chat/session", { method: "DELETE", credentials: "include" });
+    } catch {
+      /* ignore */
+    }
+    if (isBrowserSupabaseReady()) {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    }
   }
 
   if (pathname?.startsWith("/admin")) {
@@ -386,48 +458,88 @@ export function ChatWidget() {
 
               <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
                 {!profile ? (
-                  <form onSubmit={startChat} className="space-y-4">
-                    <div>
+                  !isBrowserSupabaseReady() ? (
+                    <div className="space-y-3 text-sm text-white/60">
+                      <p className="font-display text-lg text-white">Chat</p>
+                      <p>
+                        Concierge chat requires Supabase environment variables on
+                        this deployment. Add{" "}
+                        <code className="text-white/80">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
+                        and{" "}
+                        <code className="text-white/80">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
+                      </p>
+                    </div>
+                  ) : verificationSent ? (
+                    <div className="space-y-4">
                       <p className="font-display text-lg text-white">
-                        How can we help?
+                        Check your email
                       </p>
-                      <p className="mt-1 text-xs text-white/50">
-                        Share your details and our team replies within the hour.
+                      <p className="text-sm text-white/55">
+                        We sent a verification link to{" "}
+                        <span className="text-white/90">{emailInput.trim()}</span>.
+                        Click it to confirm your address — then come back here to
+                        message us. We use your verified email for replies and
+                        occasional updates you can opt out of anytime.
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVerificationSent(false);
+                          setError(null);
+                        }}
+                        className="text-xs uppercase tracking-[0.2em] text-gold-300/90 underline-offset-4 hover:underline"
+                      >
+                        Use a different email
+                      </button>
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-[10px] uppercase tracking-[0.2em] text-white/45">
-                        Name
-                      </label>
-                      <input
-                        autoFocus
-                        value={nameInput}
-                        onChange={(ev) => setNameInput(ev.target.value)}
-                        placeholder="Full name"
-                        className="w-full rounded-sm border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-gold-500/40 focus:ring-1 focus:ring-gold-500/30"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-[10px] uppercase tracking-[0.2em] text-white/45">
-                        Email
-                      </label>
-                      <input
-                        type="email"
-                        value={emailInput}
-                        onChange={(ev) => setEmailInput(ev.target.value)}
-                        placeholder="you@example.com"
-                        className="w-full rounded-sm border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-gold-500/40 focus:ring-1 focus:ring-gold-500/30"
-                      />
-                    </div>
-                    {error ? <p className="text-xs text-red-400/90">{error}</p> : null}
-                    <button
-                      type="submit"
-                      disabled={loadingProfile || !canStart}
-                      className="w-full rounded-sm bg-white py-2.5 text-xs font-semibold uppercase tracking-[0.25em] text-black transition hover:bg-gold-200 disabled:opacity-50"
-                    >
-                      {loadingProfile ? "Starting…" : "Start chat"}
-                    </button>
-                  </form>
+                  ) : (
+                    <form onSubmit={sendVerificationEmail} className="space-y-4">
+                      <div>
+                        <p className="font-display text-lg text-white">
+                          How can we help?
+                        </p>
+                        <p className="mt-1 text-xs text-white/50">
+                          Verify your email so we can reply and reach you with
+                          order updates. We reply within the hour.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-[10px] uppercase tracking-[0.2em] text-white/45">
+                          Name <span className="text-red-400/90">*</span>
+                        </label>
+                        <input
+                          autoFocus
+                          required
+                          value={nameInput}
+                          onChange={(ev) => setNameInput(ev.target.value)}
+                          placeholder="Full name"
+                          className="w-full rounded-sm border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-gold-500/40 focus:ring-1 focus:ring-gold-500/30"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-[10px] uppercase tracking-[0.2em] text-white/45">
+                          Email <span className="text-red-400/90">*</span>
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          autoComplete="email"
+                          value={emailInput}
+                          onChange={(ev) => setEmailInput(ev.target.value)}
+                          placeholder="you@example.com"
+                          className="w-full rounded-sm border border-white/10 bg-black px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-gold-500/40 focus:ring-1 focus:ring-gold-500/30"
+                        />
+                      </div>
+                      {error ? <p className="text-xs text-red-400/90">{error}</p> : null}
+                      <button
+                        type="submit"
+                        disabled={loadingProfile || !canStart}
+                        className="w-full rounded-sm bg-white py-2.5 text-xs font-semibold uppercase tracking-[0.25em] text-black transition hover:bg-gold-200 disabled:opacity-50"
+                      >
+                        {loadingProfile ? "Sending…" : "Send verification link"}
+                      </button>
+                    </form>
+                  )
                 ) : (
                   <>
                     {messages.length === 0 ? (

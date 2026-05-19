@@ -13,7 +13,7 @@ export function Footer() {
         <div>
           <p className="font-display text-lg tracking-[0.25em] text-white">WRIST RESERVE</p>
           <p className="mt-2 max-w-xs text-sm text-white/45">
-            Curated timepieces. Private sales. Discreet worldwide shipping.
+            Affordable timepieces. Private sales. Discreet worldwide shipping.
           </p>
         </div>
         <div className="flex flex-col gap-3 text-sm text-white/55">

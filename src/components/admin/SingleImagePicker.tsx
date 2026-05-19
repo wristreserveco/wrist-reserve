@@ -2,6 +2,69 @@
 
 import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 
+function safeFilename(file: File): string {
+  const raw = typeof file?.name === "string" ? file.name : "";
+  const dot = raw.lastIndexOf(".");
+  const stem = dot > 0 ? raw.slice(0, dot) : raw;
+  const ext = dot > 0 ? raw.slice(dot + 1) : "";
+  const cleanStem =
+    stem
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "")
+      .slice(0, 80) || "file";
+  const cleanExt = ext.replace(/[^A-Za-z0-9]+/g, "").toLowerCase();
+  return cleanExt ? `${cleanStem}.${cleanExt}` : cleanStem;
+}
+
+/**
+ * Direct-to-Supabase upload via signed URL — bypasses Vercel's 4.5 MB body
+ * cap so full-size photos and videos go through.
+ */
+async function uploadDirect(
+  kind: "image" | "video",
+  file: File
+): Promise<string> {
+  const filename = safeFilename(file);
+  const contentType =
+    file.type || (kind === "video" ? "video/mp4" : "image/jpeg");
+
+  const ticketRes = await fetch("/api/admin/upload-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, filename, contentType }),
+  });
+  const ticket = (await ticketRes.json().catch(() => ({}))) as {
+    signedUrl?: string;
+    publicUrl?: string;
+    error?: string;
+  };
+  if (!ticketRes.ok || !ticket.signedUrl || !ticket.publicUrl) {
+    throw new Error(
+      ticket.error || `Upload prep failed (HTTP ${ticketRes.status}).`
+    );
+  }
+
+  const putRes = await fetch(ticket.signedUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "x-upsert": "false",
+    },
+    body: file,
+  });
+  if (!putRes.ok) {
+    if (putRes.status === 413) {
+      throw new Error("File is over the 500 MB limit. Trim it first.");
+    }
+    throw new Error(`Storage rejected the upload (HTTP ${putRes.status}).`);
+  }
+  return ticket.publicUrl;
+}
+
 interface Props {
   value: string | null;
   onChange: (url: string | null) => void;
@@ -26,19 +89,9 @@ export function SingleImagePicker({
     setUploading(true);
     setError(null);
     try {
-      const isVideo = file.type.startsWith("video/");
-      const form = new FormData();
-      form.append("kind", isVideo ? "video" : "image");
-      form.append("files", file);
-      const res = await fetch("/api/admin/upload", { method: "POST", body: form });
-      const data = (await res.json()) as {
-        files?: { url: string }[];
-        error?: string;
-      };
-      if (!res.ok || !data.files?.[0]) {
-        throw new Error(data.error || "Upload failed");
-      }
-      onChange(data.files[0].url);
+      const kind = file.type.startsWith("video/") ? "video" : "image";
+      const publicUrl = await uploadDirect(kind, file);
+      onChange(publicUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {

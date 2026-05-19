@@ -7,6 +7,8 @@ import type { Category, Product, ProductStatus } from "@/lib/types";
 import { categoryTree, formatPrice, mapCategory, mapProduct } from "@/lib/products";
 import { MediaUploader } from "@/components/admin/MediaUploader";
 import { ShareProductButton } from "@/components/admin/ShareProductButton";
+import { AdminCardPreview } from "@/components/admin/AdminCardPreview";
+import { VideoPosterBackfill } from "@/components/admin/VideoPosterBackfill";
 import { WATCH_BRANDS, modelsForBrand } from "@/lib/data/watches";
 import {
   DEFAULT_TIER,
@@ -32,7 +34,6 @@ interface FormState {
   featured: boolean;
   /** Homepage “Already on wrists” strip (applies when sold / sold out). */
   on_wrist_spotlight: boolean;
-  square_url: string;
   tier: ProductTier;
 }
 
@@ -53,7 +54,6 @@ function emptyForm(): FormState {
     status: "available",
     featured: false,
     on_wrist_spotlight: true,
-    square_url: "",
     tier: DEFAULT_TIER,
   };
 }
@@ -66,7 +66,6 @@ const OPTIONAL_COLUMNS = [
   "video_poster_url",
   "video_trim_start",
   "video_trim_end",
-  "square_url",
   "tier",
   "on_wrist_spotlight",
 ] as const;
@@ -83,6 +82,354 @@ function normaliseName(raw: string | null | undefined): string {
     .replace(/[^a-zA-Z0-9]+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+/**
+ * Per-model presets for the quick-pick chips (Dial / Size / Bracelet).
+ * These drive the composer that builds Name = "{Dial} {Model} {Size} - {Bracelet}".
+ * Picking is optional — admin can still type the Name freehand.
+ */
+interface ModelPreset {
+  dials: string[];
+  sizes: string[];
+  bracelets: string[];
+  /**
+   * Community nicknames for sport models — Pepsi, Batman, Bruce Wayne, Hulk,
+   * Panda, etc. When picked, the Name is composed as
+   * `{Model} {Size} '{Nickname}' - {Bracelet}`.
+   */
+  nicknames?: string[];
+  /**
+   * `true` = compose Name from chips.
+   * `false` = Name is just the model (used as fallback for unknown models).
+   */
+  richName: boolean;
+}
+
+const DEFAULT_DIALS = [
+  "Black",
+  "White",
+  "Silver",
+  "Blue",
+  "Champagne",
+  "Green",
+  "Rhodium",
+  "Mother of Pearl",
+  "Tiffany Blue",
+  "Bright Black",
+];
+
+const MODEL_PRESETS: Record<string, ModelPreset> = {
+  // ——— Rolex: dress / casual ———
+  datejust: {
+    dials: DEFAULT_DIALS,
+    sizes: ["26", "28", "31", "36", "41"],
+    bracelets: ["Jubilee", "Oyster", "President"],
+    richName: true,
+  },
+  "day-date": {
+    dials: ["Champagne", "Silver", "Black", "Green", "Olive", "White", "Ice Blue"],
+    sizes: ["36", "40"],
+    bracelets: ["President", "Leather"],
+    richName: true,
+  },
+  daydate: {
+    dials: ["Champagne", "Silver", "Black", "Green", "Olive", "White", "Ice Blue"],
+    sizes: ["36", "40"],
+    bracelets: ["President", "Leather"],
+    richName: true,
+  },
+  "oyster-perpetual": {
+    dials: ["Tiffany", "Black", "Silver", "Yellow", "Coral", "Green", "Candy Pink"],
+    sizes: ["28", "31", "34", "36", "41"],
+    bracelets: ["Oyster"],
+    richName: true,
+  },
+  "sky-dweller": {
+    dials: ["Blue", "White", "Black", "Champagne", "Slate", "Green"],
+    sizes: ["42"],
+    bracelets: ["Oyster", "Jubilee"],
+    richName: true,
+  },
+  "air-king": {
+    dials: ["Black"],
+    sizes: ["40"],
+    bracelets: ["Oyster"],
+    richName: true,
+  },
+  cellini: {
+    dials: ["Silver", "Black", "Rhodium", "Blue"],
+    sizes: ["39"],
+    bracelets: ["Leather"],
+    richName: true,
+  },
+  "1908": {
+    dials: ["White", "Silver", "Black"],
+    sizes: ["39"],
+    bracelets: ["Leather"],
+    richName: true,
+  },
+  // ——— Rolex: sport ———
+  submariner: {
+    dials: ["Black", "Blue", "Green"],
+    sizes: ["40", "41"],
+    bracelets: ["Oyster"],
+    nicknames: ["Kermit", "Hulk", "Starbucks", "Smurf", "Bluesy"],
+    richName: true,
+  },
+  "submariner-date": {
+    dials: ["Black", "Blue", "Green"],
+    sizes: ["40", "41"],
+    bracelets: ["Oyster"],
+    nicknames: ["Kermit", "Hulk", "Starbucks", "Smurf", "Bluesy"],
+    richName: true,
+  },
+  daytona: {
+    dials: ["White", "Black", "Meteorite", "Green", "Blue", "Rainbow"],
+    sizes: ["40"],
+    bracelets: ["Oyster", "Oysterflex", "Leather"],
+    nicknames: ["Panda", "Reverse Panda", "John Mayer", "Paul Newman", "Zenith"],
+    richName: true,
+  },
+  "daytona-platinum": {
+    dials: ["Ice Blue", "Meteorite"],
+    sizes: ["40"],
+    bracelets: ["Oyster"],
+    nicknames: ["Platinum Ice", "Meteorite"],
+    richName: true,
+  },
+  "gmt-master-ii": {
+    dials: ["Black"],
+    sizes: ["40"],
+    bracelets: ["Oyster", "Jubilee"],
+    nicknames: [
+      "Pepsi",
+      "Batman",
+      "Sprite",
+      "Coke",
+      "Root Beer",
+      "Bruce Wayne",
+      "Destro",
+    ],
+    richName: true,
+  },
+  explorer: {
+    dials: ["Black"],
+    sizes: ["36", "40"],
+    bracelets: ["Oyster"],
+    richName: true,
+  },
+  "explorer-ii": {
+    dials: ["White (Polar)", "Black"],
+    sizes: ["42"],
+    bracelets: ["Oyster"],
+    richName: true,
+  },
+  "sea-dweller": {
+    dials: ["Black"],
+    sizes: ["43"],
+    bracelets: ["Oyster"],
+    richName: true,
+  },
+  deepsea: {
+    dials: ["Black", "D-Blue"],
+    sizes: ["44"],
+    bracelets: ["Oyster"],
+    richName: true,
+  },
+  milgauss: {
+    dials: ["Black", "Blue", "Z-Blue"],
+    sizes: ["40"],
+    bracelets: ["Oyster"],
+    richName: true,
+  },
+  "yacht-master": {
+    dials: ["Rhodium", "Blue", "Black", "White", "Chocolate"],
+    sizes: ["37", "40", "42"],
+    bracelets: ["Oyster", "Oysterflex"],
+    richName: true,
+  },
+  // ——— Patek Philippe ———
+  nautilus: {
+    dials: ["Blue", "Black", "White", "Olive Green", "Salmon"],
+    sizes: ["40", "40.5", "42"],
+    bracelets: ["Integrated Steel", "Leather"],
+    richName: true,
+  },
+  aquanaut: {
+    dials: ["Black", "Blue", "Khaki", "Olive"],
+    sizes: ["40", "42.2"],
+    bracelets: ["Composite", "Integrated Steel"],
+    richName: true,
+  },
+  calatrava: {
+    dials: ["Silver", "Black", "Blue", "Cream"],
+    sizes: ["38", "39", "40"],
+    bracelets: ["Leather"],
+    richName: true,
+  },
+  // ——— Audemars Piguet ———
+  "royal-oak": {
+    dials: ["Blue (Tapisserie)", "Black", "White", "Silver", "Green", "Smoked"],
+    sizes: ["37", "39", "41"],
+    bracelets: ["Integrated Steel"],
+    richName: true,
+  },
+  "royal-oak-offshore": {
+    dials: ["Black", "Blue", "Camo", "White", "Grey"],
+    sizes: ["42", "43", "44"],
+    bracelets: ["Integrated Steel", "Rubber", "Leather"],
+    richName: true,
+  },
+  // ——— Omega ———
+  speedmaster: {
+    dials: ["Black", "White (Panda)", "Silver", "Blue"],
+    sizes: ["38", "42"],
+    bracelets: ["Steel", "Leather", "NATO"],
+    richName: true,
+  },
+  seamaster: {
+    dials: ["Blue", "Black", "Green", "White", "Grey"],
+    sizes: ["38", "42", "43.5"],
+    bracelets: ["Steel", "Rubber", "NATO"],
+    richName: true,
+  },
+  // ——— Tudor ———
+  "black-bay": {
+    dials: ["Black", "Blue", "Burgundy", "Green", "Silver"],
+    sizes: ["36", "39", "41", "58"],
+    bracelets: ["Steel", "Leather", "Fabric"],
+    nicknames: ["Harrods", "Fifty-Eight Navy", "Chrono Panda", "GMT"],
+    richName: true,
+  },
+  pelagos: {
+    dials: ["Black", "Blue"],
+    sizes: ["39", "42"],
+    bracelets: ["Titanium", "Rubber"],
+    richName: true,
+  },
+};
+
+function modelKey(model: string): string {
+  return model.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function presetForModel(model: string): ModelPreset {
+  const key = modelKey(model);
+  if (!key) {
+    return { dials: [], sizes: [], bracelets: [], richName: false };
+  }
+  if (MODEL_PRESETS[key]) return MODEL_PRESETS[key];
+  // Fall back to progressively shorter prefixes — lets variants like
+  // "gmt-master-ii-pepsi", "datejust-41", "royal-oak-15400" resolve to their
+  // base preset without having to enumerate every reference number.
+  const parts = key.split("-");
+  while (parts.length > 1) {
+    parts.pop();
+    const shorter = parts.join("-");
+    if (MODEL_PRESETS[shorter]) return MODEL_PRESETS[shorter];
+  }
+  return { dials: [], sizes: [], bracelets: [], richName: false };
+}
+
+/**
+ * Compose the Name field from model + optional chips.
+ *   Sport (nickname picked): `{Model} {Size} '{Nickname}' - {Bracelet}`
+ *     e.g. "GMT-Master II 40 'Bruce Wayne' - Jubilee"
+ *   Dress (dial picked):     `{Dial} {Model} {Size} - {Bracelet}`
+ *     e.g. "Bright Black Datejust 41 - Jubilee"
+ *   Fallback:                `{Model}` on its own.
+ */
+function composeName(
+  model: string,
+  dial: string,
+  size: string,
+  bracelet: string,
+  nickname = ""
+): string {
+  const m = model.trim();
+  if (!m) return "";
+  const preset = presetForModel(m);
+  if (!preset.richName) return m;
+
+  const n = nickname.trim();
+  const d = dial.trim();
+  const s = size.trim();
+  const b = bracelet.trim();
+
+  if (n) {
+    // Sport-style: the nickname is the identity — it lives in quotes after the
+    // model + size so the reference stays first. Dial stays in the description.
+    const head = [m, s].filter(Boolean).join(" ");
+    const withNick = `${head} '${n}'`;
+    return b ? `${withNick} - ${b}` : withNick;
+  }
+
+  // Dress-style: dial drives the prefix.
+  const head = [d, m, s].filter(Boolean).join(" ");
+  return b ? `${head} - ${b}` : head;
+}
+
+/**
+ * Short, editorial product descriptions composed from model + chips + tier.
+ * Stays punchy on purpose — long marketing copy makes luxury listings feel
+ * cheap. Admin can edit after generation (manual edits are respected).
+ */
+function generateDescription(
+  model: string,
+  dial: string,
+  size: string,
+  bracelet: string,
+  tier: ProductTier,
+  nickname = ""
+): string {
+  const m = model.trim();
+  if (!m) return "";
+  // Nickname rides in the displayed model name so it reads naturally —
+  // "A collector-grade GMT-Master II 'Bruce Wayne' — Black dial, …".
+  const n = nickname.trim();
+  const name = n ? `${m} ‘${n}’` : m;
+  const d = dial.trim();
+  const s = size.trim();
+  const b = bracelet.trim();
+  const parts: string[] = [];
+  if (d) parts.push(`${d} dial`);
+  if (s) parts.push(`${s}${s.endsWith("mm") ? "" : "mm"} case`);
+  if (b) parts.push(`${b} bracelet`);
+  const spec = parts.join(", ");
+
+  if (tier === "super_tier") {
+    const lead = spec
+      ? `A collector-grade ${name} — ${spec}.`
+      : `A collector-grade ${name}.`;
+    return `${lead} Spec’d to reference, obsessed over end to end. Quality checked, free 2-day shipping nationwide.`;
+  }
+
+  const lead = spec ? `${name}. ${spec}.` : `${name}.`;
+  return `${lead} Quality checked. Free 2-day shipping nationwide.`;
+}
+
+function namePlaceholderForModel(model: string): string {
+  const preset = presetForModel(model);
+  if (preset.richName) {
+    const nickname = preset.nicknames?.[0] ?? "";
+    const dial = preset.dials[0] ?? "Black";
+    const size = preset.sizes[0] ?? "";
+    const band = preset.bracelets[0] ?? "";
+    return `e.g. ${composeName(model, dial, size, band, nickname)}`;
+  }
+  if (model.trim()) return `e.g. ${model.trim()}`;
+  return "e.g. Submariner";
+}
+
+function nameHintForModel(model: string): string {
+  const preset = presetForModel(model);
+  if (preset.richName) {
+    return preset.nicknames?.length
+      ? "Pick the nickname (Pepsi, Bruce Wayne…) + dial / size / bracelet."
+      : "Pick the chips below — Name composes itself.";
+  }
+  return "Pick a model first, then chips will appear.";
 }
 
 /**
@@ -143,6 +490,17 @@ export function AdminProductsManager() {
   // Tracks whether the admin has manually picked a category for the current form.
   // When false, we keep the category in sync with the brand/model fields.
   const [categoryManuallySet, setCategoryManuallySet] = useState(false);
+  // Quick-pick chip state for composing the Name on variant-heavy models.
+  // Not persisted — Name is the source of truth.
+  const [dialPick, setDialPick] = useState("");
+  const [sizePick, setSizePick] = useState("");
+  const [braceletPick, setBraceletPick] = useState("");
+  const [nicknamePick, setNicknamePick] = useState("");
+  // Becomes true as soon as the admin types in Name directly, stopping the
+  // chips from overwriting their phrasing.
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
+  // Same story for Description: typing in the textarea stops auto-compose.
+  const [descManuallyEdited, setDescManuallyEdited] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -189,6 +547,12 @@ export function AdminProductsManager() {
     setEditing(null);
     setForm(emptyForm());
     setCategoryManuallySet(false);
+    setDialPick("");
+    setSizePick("");
+    setBraceletPick("");
+    setNicknamePick("");
+    setNameManuallyEdited(false);
+    setDescManuallyEdited(false);
     setModalOpen(true);
   }
 
@@ -198,6 +562,13 @@ export function AdminProductsManager() {
     // we won't auto-override it when brand/model changes. (They can still
     // switch to "— None —" to re-enable auto-linking.)
     setCategoryManuallySet(Boolean(p.category_id));
+    // Editing an existing product: keep their typed Name as-is, don't let chips touch it.
+    setDialPick("");
+    setSizePick("");
+    setBraceletPick("");
+    setNicknamePick("");
+    setNameManuallyEdited(true);
+    setDescManuallyEdited(true);
     setForm({
       name: p.name,
       brand: p.brand ?? "",
@@ -214,7 +585,6 @@ export function AdminProductsManager() {
       status: p.status,
       featured: p.featured,
       on_wrist_spotlight: p.on_wrist_spotlight !== false,
-      square_url: p.square_url ?? "",
       tier: p.tier ?? DEFAULT_TIER,
     });
     setModalOpen(true);
@@ -253,7 +623,6 @@ export function AdminProductsManager() {
       status: derivedStatus,
       featured: form.featured,
       on_wrist_spotlight: form.on_wrist_spotlight,
-      square_url: form.square_url.trim() || null,
       tier: form.tier,
     };
 
@@ -297,6 +666,30 @@ export function AdminProductsManager() {
     await load();
   }
 
+  // One-tap "wipe my seed/test catalog" — typed confirmation to avoid accidents.
+  async function onDeleteAllProducts() {
+    const n = rows.length;
+    if (n === 0) return;
+    const phrase = typeof window === "undefined" ? "" : window.prompt(
+      `Type DELETE to remove ALL ${n} products. This cannot be undone.`,
+      ""
+    );
+    if (phrase !== "DELETE") return;
+    const supabase = createClient();
+    const { error: dError } = await supabase
+      .from("products")
+      .delete()
+      // supabase-js requires a filter on every mutation; this one matches
+      // every row so long as IDs exist (true for uuid PKs).
+      .not("id", "is", null);
+    if (dError) {
+      setError(dError.message);
+      return;
+    }
+    setError(null);
+    await load();
+  }
+
   async function toggleFeatured(p: Product) {
     const supabase = createClient();
     await supabase.from("products").update({ featured: !p.featured }).eq("id", p.id);
@@ -316,6 +709,26 @@ export function AdminProductsManager() {
     ) {
       setError(
         'Run migration 015_on_wrist_spotlight.sql so the "On wrists" toggle can save.',
+      );
+      return;
+    }
+    if (error) setError(error.message);
+    await load();
+  }
+
+  async function toggleHidden(p: Product) {
+    const supabase = createClient();
+    const next = !p.hidden;
+    const { error } = await supabase
+      .from("products")
+      .update({ hidden: next })
+      .eq("id", p.id);
+    if (
+      error &&
+      /column|does not exist|schema|unknown/i.test(error.message)
+    ) {
+      setError(
+        'Run migration 018_product_hidden.sql so the Hide/Show toggle can save.',
       );
       return;
     }
@@ -427,6 +840,111 @@ export function AdminProductsManager() {
     form.brand,
     form.model,
     form.category_id,
+  ]);
+
+  // Reverse shortcut — picking "Rolex › Submariner" in the Category dropdown
+  // fills Brand = Rolex, Model = Submariner, and Name = "Submariner" (just the
+  // model — the brand lives in its own field, we don't need to prefix it
+  // again). The admin can always overwrite any of it.
+  useEffect(() => {
+    if (!modalOpen) return;
+    if (!form.category_id) return;
+    const picked = categoryLookup.get(form.category_id);
+    if (!picked) return;
+    const parent = picked.parent_id
+      ? categoryLookup.get(picked.parent_id) ?? null
+      : null;
+    const nextBrand = parent ? parent.name : picked.name;
+    const nextModel = parent ? picked.name : "";
+    const nameDefault = nextModel || nextBrand; // "Submariner", else "Rolex"
+    // All plausible auto names we might have written previously — if the admin
+    // hasn't touched the field, any of these means "replace with the new one".
+    const autoNameCandidates = new Set<string>();
+    categoryLookup.forEach((c) => {
+      autoNameCandidates.add(c.name);
+      if (c.parent_id) {
+        const p = categoryLookup.get(c.parent_id);
+        if (p) autoNameCandidates.add(`${p.name} ${c.name}`);
+      }
+    });
+    setForm((f) => {
+      let brandNameMatch = false;
+      categoryLookup.forEach((c) => {
+        if (c.name === f.brand) brandNameMatch = true;
+      });
+      const brandLooksAuto =
+        f.brand.trim().length === 0 ||
+        autoMatchCategoryId(categories, f.brand, f.model) === f.category_id ||
+        brandNameMatch;
+      const patch: Partial<FormState> = {};
+      if (brandLooksAuto && f.brand !== nextBrand) patch.brand = nextBrand;
+      if (brandLooksAuto && f.model !== nextModel) patch.model = nextModel;
+      if (
+        !nameManuallyEdited &&
+        (f.name.trim().length === 0 || autoNameCandidates.has(f.name.trim()))
+      ) {
+        patch.name = nameDefault;
+      }
+      return Object.keys(patch).length === 0 ? f : { ...f, ...patch };
+    });
+    // Reset chips so they don't carry over from the previous category.
+    setDialPick("");
+    setSizePick("");
+    setBraceletPick("");
+    setNicknamePick("");
+  }, [form.category_id, modalOpen, categoryLookup, categories, nameManuallyEdited]);
+
+  // Chip composer: while the admin hasn't hand-typed the Name, any chip change
+  // rewrites it via `composeName(model, dial, size, bracelet)`.
+  useEffect(() => {
+    if (!modalOpen) return;
+    if (nameManuallyEdited) return;
+    const preset = presetForModel(form.model);
+    if (!preset.richName) return;
+    const composed = composeName(
+      form.model,
+      dialPick,
+      sizePick,
+      braceletPick,
+      nicknamePick
+    );
+    setForm((f) => (f.name === composed ? f : { ...f, name: composed }));
+  }, [
+    modalOpen,
+    nameManuallyEdited,
+    form.model,
+    dialPick,
+    sizePick,
+    braceletPick,
+    nicknamePick,
+  ]);
+
+  // Description auto-gen. Same contract as name: as long as the admin hasn't
+  // hand-typed the textarea, recompose on chip/model/tier change.
+  useEffect(() => {
+    if (!modalOpen) return;
+    if (descManuallyEdited) return;
+    if (!form.model.trim()) return;
+    const composed = generateDescription(
+      form.model,
+      dialPick,
+      sizePick,
+      braceletPick,
+      form.tier,
+      nicknamePick
+    );
+    setForm((f) =>
+      f.description === composed ? f : { ...f, description: composed }
+    );
+  }, [
+    modalOpen,
+    descManuallyEdited,
+    form.model,
+    dialPick,
+    sizePick,
+    braceletPick,
+    nicknamePick,
+    form.tier,
   ]);
 
   // Human-readable suggested path for the tiny helper text next to the dropdown.
@@ -602,6 +1120,17 @@ export function AdminProductsManager() {
           >
             + Add product
           </button>
+          {rows.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => void onDeleteAllProducts()}
+              className="rounded-sm border border-red-500/30 bg-red-500/5 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-red-300 transition hover:border-red-400/60 hover:bg-red-500/15 hover:text-red-100"
+              title={`Delete all ${rows.length} products — typed confirmation required`}
+            >
+              Delete all ({rows.length})
+            </button>
+          ) : null}
+          <VideoPosterBackfill />
         </div>
       </div>
 
@@ -654,6 +1183,7 @@ export function AdminProductsManager() {
           onDelete={onDelete}
           onAdjustQuantity={adjustQuantity}
           onToggleOnWrist={toggleOnWrist}
+          onToggleHidden={toggleHidden}
         />
       ) : (
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -664,22 +1194,27 @@ export function AdminProductsManager() {
             return (
               <div
                 key={p.id}
-                className="group overflow-hidden rounded-sm border border-white/10 bg-zinc-950/80 transition hover:border-gold-400/30"
+                className={`group overflow-hidden rounded-sm border bg-zinc-950/80 transition ${
+                  p.hidden
+                    ? "border-red-500/25 opacity-70 hover:border-red-400/50 hover:opacity-100"
+                    : "border-white/10 hover:border-gold-400/30"
+                }`}
               >
                 <div className="relative aspect-[4/3] overflow-hidden bg-black">
-                  {cover ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={cover}
-                      alt={p.name}
-                      className="h-full w-full object-cover transition group-hover:scale-[1.02]"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-[0.18em] text-white/30">
-                      No image
-                    </div>
-                  )}
-                  <div className="absolute left-2 top-2 flex gap-1.5">
+                  <AdminCardPreview
+                    cover={cover}
+                    videoUrl={p.video_url}
+                    videoPosterUrl={p.video_poster_url}
+                    videoTrimStart={p.video_trim_start}
+                    videoTrimEnd={p.video_trim_end}
+                    alt={p.name}
+                  />
+                  <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
+                    {p.hidden ? (
+                      <span className="rounded-sm border border-red-400/60 bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-red-100">
+                        Hidden
+                      </span>
+                    ) : null}
                     {p.tier === "super_tier" ? (
                       <span className="rounded-sm border border-gold-400/70 bg-gold-400/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-gold-100">
                         {TIER_META.super_tier.label}
@@ -690,7 +1225,7 @@ export function AdminProductsManager() {
                         Featured
                       </span>
                     ) : null}
-                    {outOfStock && p.on_wrist_spotlight !== false ? (
+                    {p.on_wrist_spotlight !== false ? (
                       <span className="rounded-sm border border-white/25 bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-white/90">
                         On wrists
                       </span>
@@ -776,27 +1311,41 @@ export function AdminProductsManager() {
                     >
                       {p.featured ? "Unfeature" : "Feature"}
                     </button>
-                    {outOfStock ? (
-                      <button
-                        type="button"
-                        onClick={() => void toggleOnWrist(p)}
-                        className={`rounded-sm border px-3 py-1.5 transition ${
-                          p.on_wrist_spotlight !== false
-                            ? "border-white/30 text-white/80 hover:border-white/50"
-                            : "border-white/10 text-white/45 hover:border-white/25 hover:text-white/75"
-                        }`}
-                      >
-                        {p.on_wrist_spotlight !== false
-                          ? "Remove from on-wrists"
-                          : "Show on on-wrists"}
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void toggleOnWrist(p)}
+                      className={`rounded-sm border px-3 py-1.5 transition ${
+                        p.on_wrist_spotlight !== false
+                          ? "border-white/30 text-white/80 hover:border-white/50"
+                          : "border-white/10 text-white/45 hover:border-white/25 hover:text-white/75"
+                      }`}
+                    >
+                      {p.on_wrist_spotlight !== false
+                        ? "Hide from on-wrists"
+                        : "Show on on-wrists"}
+                    </button>
                     <button
                       type="button"
                       onClick={() => void toggleStatus(p)}
                       className="rounded-sm border border-white/10 px-3 py-1.5 text-white/60 transition hover:border-white/30 hover:text-white"
                     >
                       Mark {outOfStock ? "available" : "sold"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void toggleHidden(p)}
+                      className={`rounded-sm border px-3 py-1.5 transition ${
+                        p.hidden
+                          ? "border-red-400/60 bg-red-500/10 text-red-200 hover:border-red-300 hover:bg-red-500/15"
+                          : "border-white/10 text-white/60 hover:border-white/30 hover:text-white"
+                      }`}
+                      title={
+                        p.hidden
+                          ? "Currently hidden from public site — click to unhide"
+                          : "Hide this product from the public site"
+                      }
+                    >
+                      {p.hidden ? "Unhide" : "Hide"}
                     </button>
                     <ShareProductButton productId={p.id} />
                     <button
@@ -889,12 +1438,49 @@ export function AdminProductsManager() {
                   <Field label="Name">
                     <input
                       value={form.name}
-                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      onChange={(e) => {
+                        setNameManuallyEdited(true);
+                        setForm((f) => ({ ...f, name: e.target.value }));
+                      }}
                       required
-                      placeholder="e.g. Rolex Submariner Date"
+                      placeholder={namePlaceholderForModel(form.model)}
                       className="input"
                     />
+                    <p className="mt-1 text-[10px] text-white/35">
+                      {nameHintForModel(form.model)}
+                    </p>
                   </Field>
+
+                  <ModelChipComposer
+                    model={form.model}
+                    dial={dialPick}
+                    size={sizePick}
+                    bracelet={braceletPick}
+                    nickname={nicknamePick}
+                    onDial={(v) => {
+                      setNameManuallyEdited(false);
+                      setDialPick(v);
+                    }}
+                    onSize={(v) => {
+                      setNameManuallyEdited(false);
+                      setSizePick(v);
+                    }}
+                    onBracelet={(v) => {
+                      setNameManuallyEdited(false);
+                      setBraceletPick(v);
+                    }}
+                    onNickname={(v) => {
+                      setNameManuallyEdited(false);
+                      setNicknamePick(v);
+                    }}
+                    onReset={() => {
+                      setNameManuallyEdited(false);
+                      setDialPick("");
+                      setSizePick("");
+                      setBraceletPick("");
+                      setNicknamePick("");
+                    }}
+                  />
 
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Brand">
@@ -1019,13 +1605,41 @@ export function AdminProductsManager() {
                   <Field label="Description">
                     <textarea
                       value={form.description}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, description: e.target.value }))
-                      }
-                      rows={5}
+                      onChange={(e) => {
+                        setDescManuallyEdited(true);
+                        setForm((f) => ({ ...f, description: e.target.value }));
+                      }}
+                      rows={4}
                       placeholder="Reference, movement, origin, any collector notes…"
                       className="input resize-none"
                     />
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <p className="text-[10px] text-white/35">
+                        {descManuallyEdited
+                          ? "Custom copy — won't be overwritten by chips."
+                          : "Auto-composes from chips + tier. Edit to take over."}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDescManuallyEdited(false);
+                          setForm((f) => ({
+                            ...f,
+                            description: generateDescription(
+                              f.model,
+                              dialPick,
+                              sizePick,
+                              braceletPick,
+                              f.tier,
+                              nicknamePick
+                            ),
+                          }));
+                        }}
+                        className="rounded-sm border border-white/10 bg-black px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55 transition hover:border-gold-400/40 hover:text-gold-200"
+                      >
+                        Generate
+                      </button>
+                    </div>
                   </Field>
 
                   <Field label="Tier">
@@ -1055,25 +1669,8 @@ export function AdminProductsManager() {
                     </div>
                     <p className="mt-1 text-[10px] text-white/35">
                       {form.tier === "super_tier"
-                        ? `Tagged as ${TIER_META.super_tier.label} — shown with a gold badge on cards and featured on the homepage strip.`
-                        : `No public tier — this label is admin-only. Customers see it as regular catalog.`}
-                    </p>
-                  </Field>
-
-                  <Field label="Square checkout link (optional)">
-                    <input
-                      type="url"
-                      inputMode="url"
-                      value={form.square_url}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, square_url: e.target.value }))
-                      }
-                      placeholder="https://checkout.square.site/…"
-                      className="input"
-                    />
-                    <p className="mt-1 text-[10px] text-white/35">
-                      Paste the Square payment link you&rsquo;d use on Instagram for
-                      this watch. If left blank, the default store Square link is used.
+                        ? `Tagged as ${TIER_META.super_tier.label} — gold badge on cards, homepage Super Tier funnel, and shop filter. Not mixed into the Datejust/Sub/GMT… collection hero thumbnails.`
+                        : `Catalog tier — no public badge. Customers see the listing without a tier chip.`}
                     </p>
                   </Field>
 
@@ -1186,6 +1783,155 @@ function Field({
       </span>
       <div className="mt-2">{children}</div>
     </label>
+  );
+}
+
+/**
+ * Chip composer for rich-name models (Datejust, Day-Date, OP, Sky-Dweller, …).
+ * Picking a chip mutates the parent's Name via a recompose effect. Free-type
+ * is still supported in the Name input itself — typing stops auto-compose.
+ */
+function ModelChipComposer({
+  model,
+  dial,
+  size,
+  bracelet,
+  nickname,
+  onDial,
+  onSize,
+  onBracelet,
+  onNickname,
+  onReset,
+}: {
+  model: string;
+  dial: string;
+  size: string;
+  bracelet: string;
+  nickname: string;
+  onDial: (v: string) => void;
+  onSize: (v: string) => void;
+  onBracelet: (v: string) => void;
+  onNickname: (v: string) => void;
+  onReset: () => void;
+}) {
+  const preset = presetForModel(model);
+  if (!preset.richName) return null;
+  const hasNicknames = (preset.nicknames?.length ?? 0) > 0;
+  const hasAny = dial || size || bracelet || nickname;
+
+  return (
+    <div className="rounded-sm border border-white/10 bg-white/[0.02] p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-white/40">
+          Compose name
+        </p>
+        {hasAny ? (
+          <button
+            type="button"
+            onClick={onReset}
+            className="text-[10px] uppercase tracking-[0.15em] text-white/40 transition hover:text-white"
+          >
+            Reset
+          </button>
+        ) : null}
+      </div>
+
+      {hasNicknames ? (
+        <ChipRow
+          label="Nickname"
+          options={preset.nicknames ?? []}
+          selected={nickname}
+          onSelect={onNickname}
+          allowFreeText
+          placeholder="Custom nickname…"
+        />
+      ) : null}
+      <ChipRow
+        label="Dial"
+        options={preset.dials}
+        selected={dial}
+        onSelect={onDial}
+        allowFreeText
+        placeholder="Custom dial…"
+      />
+      <ChipRow
+        label="Size"
+        options={preset.sizes.map((s) => `${s}mm`)}
+        selected={size ? `${size}${size.endsWith("mm") ? "" : "mm"}` : ""}
+        onSelect={(v) => onSize(v.replace(/mm$/i, ""))}
+        allowFreeText
+        placeholder="Custom size…"
+      />
+      <ChipRow
+        label="Bracelet"
+        options={preset.bracelets}
+        selected={bracelet}
+        onSelect={onBracelet}
+        allowFreeText
+        placeholder="Custom bracelet…"
+      />
+    </div>
+  );
+}
+
+function ChipRow({
+  label,
+  options,
+  selected,
+  onSelect,
+  allowFreeText,
+  placeholder,
+}: {
+  label: string;
+  options: string[];
+  selected: string;
+  onSelect: (value: string) => void;
+  allowFreeText?: boolean;
+  placeholder?: string;
+}) {
+  const [custom, setCustom] = useState("");
+  useEffect(() => {
+    // If the selected value isn't in the preset list, show it in the custom input.
+    if (selected && !options.includes(selected)) setCustom(selected);
+    else setCustom("");
+  }, [selected, options]);
+
+  return (
+    <div className="mt-3 first:mt-2">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">
+        {label}
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {options.map((opt) => {
+          const isActive = selected === opt;
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => onSelect(isActive ? "" : opt)}
+              className={`rounded-sm border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] transition ${
+                isActive
+                  ? "border-gold-400/60 bg-gold-400/10 text-gold-100"
+                  : "border-white/10 bg-black text-white/55 hover:border-white/25 hover:text-white"
+              }`}
+            >
+              {opt}
+            </button>
+          );
+        })}
+        {allowFreeText ? (
+          <input
+            value={custom}
+            onChange={(e) => {
+              setCustom(e.target.value);
+              onSelect(e.target.value.trim());
+            }}
+            placeholder={placeholder}
+            className="min-w-[120px] flex-1 rounded-sm border border-white/10 bg-black px-2.5 py-1 text-[11px] text-white outline-none placeholder:text-white/25 focus:border-gold-400/40"
+          />
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -1327,6 +2073,7 @@ function ListViewInline({
   onDelete,
   onAdjustQuantity,
   onToggleOnWrist,
+  onToggleHidden,
 }: {
   products: Product[];
   categoryPath: (id: string | null) => string;
@@ -1335,6 +2082,7 @@ function ListViewInline({
   onDelete: (id: string) => void | Promise<void>;
   onAdjustQuantity: (p: Product, delta: number) => void | Promise<void>;
   onToggleOnWrist?: (p: Product) => void | Promise<void>;
+  onToggleHidden?: (p: Product) => void | Promise<void>;
 }) {
   return (
     <div className="mt-8 overflow-x-auto rounded-sm border border-white/10 bg-zinc-950/60">
@@ -1356,7 +2104,12 @@ function ListViewInline({
             const outOfStock = p.quantity <= 0;
             const cat = p.category_id ? categoryLookup.get(p.category_id) : null;
             return (
-              <tr key={p.id} className="hover:bg-white/[0.02]">
+              <tr
+                key={p.id}
+                className={`hover:bg-white/[0.02] ${
+                  p.hidden ? "opacity-60" : ""
+                }`}
+              >
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-black">
@@ -1372,6 +2125,11 @@ function ListViewInline({
                     <div className="min-w-0">
                       <p className="truncate font-medium text-white">{p.name}</p>
                       <div className="flex flex-wrap gap-2">
+                        {p.hidden ? (
+                          <span className="text-[9px] uppercase tracking-[0.18em] text-red-300">
+                            Hidden
+                          </span>
+                        ) : null}
                         {p.tier === "super_tier" ? (
                           <span className="text-[9px] uppercase tracking-[0.18em] text-gold-200">
                             {TIER_META.super_tier.label}
@@ -1382,7 +2140,7 @@ function ListViewInline({
                             Featured
                           </span>
                         ) : null}
-                        {outOfStock && p.on_wrist_spotlight !== false ? (
+                        {p.on_wrist_spotlight !== false ? (
                           <span className="text-[9px] uppercase tracking-[0.18em] text-white/50">
                             On wrists
                           </span>
@@ -1450,7 +2208,20 @@ function ListViewInline({
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="inline-flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-                    {outOfStock && onToggleOnWrist ? (
+                    {onToggleHidden ? (
+                      <button
+                        type="button"
+                        onClick={() => void onToggleHidden(p)}
+                        className={`text-[10px] uppercase tracking-[0.18em] ${
+                          p.hidden
+                            ? "text-red-300 hover:text-red-200"
+                            : "text-white/45 hover:text-white"
+                        }`}
+                      >
+                        {p.hidden ? "Unhide" : "Hide"}
+                      </button>
+                    ) : null}
+                    {onToggleOnWrist ? (
                       <button
                         type="button"
                         onClick={() => void onToggleOnWrist(p)}

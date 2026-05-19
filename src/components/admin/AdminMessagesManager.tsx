@@ -288,23 +288,64 @@ export function AdminMessagesManager() {
     name: string;
   } | null> {
     if (!pending) return null;
-    const form = new FormData();
-    form.append("files", pending.file);
-    form.append("kind", pending.type);
+    // Sanitize filename for the storage key AND work around WebKit's
+    // "string did not match the expected pattern" bug.
+    const raw = pending.file.name || "";
+    const dot = raw.lastIndexOf(".");
+    const stem =
+      (dot > 0 ? raw.slice(0, dot) : raw)
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Za-z0-9._-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^[-.]+|[-.]+$/g, "")
+        .slice(0, 80) || "file";
+    const ext = (dot > 0 ? raw.slice(dot + 1) : "")
+      .replace(/[^A-Za-z0-9]+/g, "")
+      .toLowerCase();
+    const cleanName = ext ? `${stem}.${ext}` : stem;
+
     setUploading(true);
     try {
-      const res = await fetch("/api/admin/upload", {
+      const contentType =
+        pending.file.type ||
+        (pending.type === "video" ? "video/mp4" : "image/jpeg");
+      const kind: "image" | "video" =
+        pending.type === "video" ? "video" : "image";
+
+      // Direct-to-Supabase via signed URL bypasses Vercel's 4.5 MB body cap.
+      const ticketRes = await fetch("/api/admin/upload-url", {
         method: "POST",
-        body: form,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, filename: cleanName, contentType }),
         credentials: "include",
       });
-      const data = (await res.json()) as {
-        files?: { url: string }[];
+      const ticket = (await ticketRes.json().catch(() => ({}))) as {
+        signedUrl?: string;
+        publicUrl?: string;
         error?: string;
       };
-      const url = data.files?.[0]?.url;
-      if (!res.ok || !url) throw new Error(data.error || "Upload failed");
-      return { url, type: pending.type, name: pending.file.name };
+      if (!ticketRes.ok || !ticket.signedUrl || !ticket.publicUrl) {
+        throw new Error(
+          ticket.error || `Upload prep failed (HTTP ${ticketRes.status}).`
+        );
+      }
+
+      const putRes = await fetch(ticket.signedUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "x-upsert": "false",
+        },
+        body: pending.file,
+      });
+      if (!putRes.ok) {
+        throw new Error(
+          `Storage rejected the upload (HTTP ${putRes.status}).`
+        );
+      }
+      return { url: ticket.publicUrl, type: pending.type, name: raw };
     } finally {
       setUploading(false);
     }

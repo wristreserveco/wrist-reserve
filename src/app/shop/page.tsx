@@ -5,8 +5,10 @@ import { ShopFilters } from "@/components/ShopFilters";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
 import {
+  getRootCategory,
   mapCategory,
   mapProduct,
+  productIsShopBuyable,
   productShopBrandLabel,
   resolveCategoryBySlug,
 } from "@/lib/products";
@@ -34,17 +36,18 @@ async function ShopContent({
   // `reserve` (legacy — kept working so old share links don't break).
   const rawTierSlug = parseParam(searchParams.tier).trim().toLowerCase();
   const tierSlug = rawTierSlug === "reserve" ? "super_tier" : rawTierSlug;
-  const activeTier: ProductTier | null = PRODUCT_TIERS.includes(
-    tierSlug as ProductTier
-  )
-    ? (tierSlug as ProductTier)
-    : null;
+  /** Full grid (classic + super). Rare; set from the shop filter link. */
+  const showAllTiers = tierSlug === "all";
+  const activeTier: ProductTier | null = showAllTiers
+    ? null
+    : !tierSlug
+      ? null
+      : PRODUCT_TIERS.includes(tierSlug as ProductTier)
+        ? (tierSlug as ProductTier)
+        : null;
 
-  // `sort` and `stock` are driven by the filter UI. Both default to the most
-  // buyer-friendly behaviour (newest first, sold items still visible so buyers
-  // can see the full catalog).
+  // `sort` is driven by the filter UI (newest first by default).
   const sortParam = parseParam(searchParams.sort).trim().toLowerCase();
-  const hideSold = parseParam(searchParams.stock).trim() === "available";
 
   let products: Product[] = [];
   let brands: string[] = [];
@@ -57,6 +60,8 @@ async function ShopContent({
   // narrows `products` by the active filters, otherwise the Collections chip
   // row would collapse to just the brand you're already on.
   let allProductsBeforeFilter: Product[] = [];
+  /** Category rows (leaf or any depth) that have ≥1 buyable product — shared by filters + chips. */
+  let liveBuyableCategoryIds: string[] = [];
 
   if (isSupabaseConfigured()) {
     const supabase = await createClient();
@@ -64,6 +69,7 @@ async function ShopContent({
       supabase
         .from("products")
         .select("*")
+        .or("hidden.is.null,hidden.eq.false")
         .order("created_at", { ascending: false }),
       supabase
         .from("categories")
@@ -81,19 +87,33 @@ async function ShopContent({
       mapCategory(row as Record<string, unknown>)
     );
 
-    // Brand dropdown: use top-level category names (your actual brand list).
-    // Relying only on `products.brand` leaves the select empty when inventory
-    // is filed under category only.
+    const buyableCategoryIds = new Set(
+      allProductsBeforeFilter
+        .filter((p) => productIsShopBuyable(p) && p.category_id)
+        .map((p) => p.category_id as string),
+    );
+    liveBuyableCategoryIds = Array.from(buyableCategoryIds);
+
+    // Brand dropdown: only brands (root categories) that currently have
+    // buyable inventory under them — never advertise Richard Mille when
+    // every RM piece is sold or you never stocked one.
     const parentNames = categories
       .filter((c) => !c.parent_id)
       .map((c) => c.name.trim())
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
     if (parentNames.length > 0) {
-      brands = parentNames;
+      const rootsWithStock = new Set<string>();
+      for (const p of allProductsBeforeFilter) {
+        if (!productIsShopBuyable(p) || !p.category_id) continue;
+        const root = getRootCategory(categories, p.category_id);
+        if (root?.name?.trim()) rootsWithStock.add(root.name.trim());
+      }
+      brands = parentNames.filter((n) => rootsWithStock.has(n));
     } else {
       const brandSet = new Set<string>();
-      products.forEach((p) => {
+      allProductsBeforeFilter.forEach((p) => {
+        if (!productIsShopBuyable(p)) return;
         const label = productShopBrandLabel(p, categories);
         if (label) brandSet.add(label);
       });
@@ -120,8 +140,14 @@ async function ShopContent({
       if (includeIds && (!p.category_id || !includeIds.has(p.category_id))) {
         return false;
       }
-      if (activeTier && p.tier !== activeTier) return false;
-      if (hideSold && p.status !== "available") return false;
+      if (showAllTiers) {
+        // explicit ?tier=all — no tier-based exclusion
+      } else if (activeTier) {
+        if (p.tier !== activeTier) return false;
+      } else {
+        // Default shop view: main catalog only (Super Tier is opt-in via toggle).
+        if (p.tier === "super_tier") return false;
+      }
       if (brand) {
         const label = productShopBrandLabel(p, categories);
         if (
@@ -161,35 +187,44 @@ async function ShopContent({
     }
   }
 
-  // Build the sub-category chips: if we're on a parent category, show its kids;
-  // if we're on a sub-category, show its siblings.
-  const chipCategories: Category[] = activeCategory
+  // Sub-category pills: only lines/models with buyable inventory right now.
+  const buyableSet = new Set(liveBuyableCategoryIds);
+  const chipCategoriesRaw: Category[] = activeCategory
     ? childCategories.length > 0
       ? childCategories
       : parentCategory
-      ? categories.filter((c) => c.parent_id === parentCategory!.id)
-      : []
+        ? categories.filter((c) => c.parent_id === parentCategory!.id)
+        : []
+    : [];
+  const chipCategories: Category[] = activeCategory
+    ? chipCategoriesRaw.filter(
+        (c) => buyableSet.has(c.id) || c.id === activeCategory.id,
+      )
     : [];
 
-  // Only show a landing banner for publicly-advertised tiers. The default
-  // tier has no customer-facing name, so we'd rather show nothing than expose
-  // "Standard" / "Classic" on the storefront.
+  // Only show a landing banner for publicly-advertised tiers when that tier
+  // filter is active (not for ?tier=all).
   const tierMeta =
     activeTier && TIER_META[activeTier].publiclyAdvertised
       ? TIER_META[activeTier]
       : null;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 sm:py-16 lg:px-8">
       {tierMeta ? (
-        <div className="mb-10 rounded-sm border border-gold-400/30 bg-gradient-to-r from-gold-500/10 via-black to-black px-6 py-8 sm:px-10">
+        <div className="mb-5 rounded-sm border border-gold-400/30 bg-gradient-to-r from-gold-500/10 via-black to-black px-4 py-4 sm:mb-10 sm:px-10 sm:py-8">
           <p className="text-[10px] uppercase tracking-[0.3em] text-gold-300">
             {tierMeta.label}
           </p>
-          <h1 className="mt-2 font-display text-3xl text-white sm:text-4xl">
+          <h1 className="mt-1 font-display text-2xl text-white sm:mt-2 sm:text-4xl">
             {tierMeta.plural}
           </h1>
-          <p className="mt-3 max-w-2xl text-sm text-white/60">{tierMeta.blurb}</p>
+          <p className="mt-2 text-xs leading-snug text-white/60 md:hidden">
+            {tierMeta.tagline}
+          </p>
+          <p className="mt-3 hidden max-w-2xl text-sm text-white/60 md:block">
+            {tierMeta.blurb}
+          </p>
         </div>
       ) : null}
 
@@ -219,13 +254,7 @@ async function ShopContent({
           brands={brands}
           categories={categories}
           activeTier={activeTier}
-          liveCategoryIds={Array.from(
-            new Set(
-              allProductsBeforeFilter
-                .filter((p) => p.status !== "sold" && p.category_id)
-                .map((p) => p.category_id as string),
-            ),
-          )}
+          liveCategoryIds={liveBuyableCategoryIds}
         />
       </Suspense>
 

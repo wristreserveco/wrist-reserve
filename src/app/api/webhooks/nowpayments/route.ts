@@ -7,6 +7,7 @@ import {
 } from "@/lib/payments/nowpayments";
 import { createServiceClient } from "@/lib/supabase/service";
 import { decrementProductStock } from "@/lib/inventory";
+import { autoBuyLabelForOrder, isAutoShipEnabled } from "@/lib/shipping/autoship";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,11 +63,21 @@ export async function POST(request: Request) {
   if (mapped === "paid") {
     const { data: order } = await supabase
       .from("orders")
-      .select("product_id")
+      .select("product_id, quantity")
       .eq("id", payload.order_id)
       .single();
     if (order?.product_id) {
-      await decrementProductStock(supabase, order.product_id);
+      const qty =
+        typeof order.quantity === "number" && order.quantity > 0
+          ? order.quantity
+          : 1;
+      await decrementProductStock(supabase, order.product_id, qty);
+    }
+
+    if (isAutoShipEnabled()) {
+      void autoBuyLabelForOrder({ service: supabase, orderId: payload.order_id }).catch(
+        (err) => console.error("[autoship] nowpayments webhook:", err)
+      );
     }
   }
 
