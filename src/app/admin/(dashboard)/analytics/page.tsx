@@ -1,28 +1,31 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AnalyticsSessionShell } from "@/components/admin/AnalyticsSessionShell";
+import { AdminAnalyticsBreakdowns } from "@/components/admin/AdminAnalyticsBreakdowns";
+import { AdminAnalyticsSearch } from "@/components/admin/AdminAnalyticsSearch";
+import {
+  formatMs,
+  isLiveSession,
+  parseUserAgent,
+  pathWithQuery,
+  referrerLabel,
+} from "@/lib/analytics/display";
 
 export const dynamic = "force-dynamic";
 
-function formatMs(ms: number) {
-  const s = Math.round(ms / 1000);
-  if (s < 3600) {
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    return m > 0 ? `${m}m ${r}s` : `${r}s`;
-  }
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-
-type AnalyticsSummary = {
+type ExtendedSummary = {
   sessions: number;
   unique_visitors: number;
   page_views: number;
   avg_engaged_s: number;
+  live_sessions: number;
+  returning_visitors: number;
+  marketing_opt_ins: number;
+  bounce_sessions: number;
+  product_views: number;
 };
 
 type SessionListRow = {
@@ -32,18 +35,30 @@ type SessionListRow = {
   started_at: string;
   last_activity_at: string;
   landing_path: string | null;
+  landing_query: string | null;
   exit_path: string | null;
   referrer: string | null;
   utm_source: string | null;
   utm_medium: string | null;
   utm_campaign: string | null;
+  utm_content: string | null;
+  utm_term: string | null;
   page_view_count: number;
   engaged_ms: number;
   capture_email: string | null;
+  capture_name: string | null;
   marketing_opt_in: boolean | null;
+  admin_tags: string[] | null;
+  user_agent: string | null;
+  client_ip: string | null;
+  viewport_w: number | null;
+  viewport_h: number | null;
+  browser_language: string | null;
+  timezone: string | null;
 };
 
-type TopPathRow = { path: string; view_count: number };
+const SESSION_SELECT =
+  "id, session_public_id, visitor_id, started_at, last_activity_at, landing_path, landing_query, exit_path, referrer, utm_source, utm_medium, utm_campaign, utm_content, utm_term, page_view_count, engaged_ms, capture_email, capture_name, marketing_opt_in, admin_tags, user_agent, client_ip, viewport_w, viewport_h, browser_language, timezone";
 
 export default async function AdminAnalyticsPage({
   searchParams,
@@ -61,52 +76,132 @@ export default async function AdminAnalyticsPage({
   const days = Math.min(90, Math.max(1, Number(daysStr) || 7));
   const sessionOpen =
     typeof searchParams.session === "string" ? searchParams.session : "";
+  const searchQ =
+    typeof searchParams.q === "string"
+      ? searchParams.q.trim().replace(/[%_\\]/g, "").slice(0, 120)
+      : "";
 
   const since = new Date();
   since.setDate(since.getDate() - days);
   const sinceIso = since.toISOString();
 
   let warning: string | null = null;
-  let summary: AnalyticsSummary | null = null;
-  let topPaths: TopPathRow[] = [];
+  let needsMigration025 = false;
+  let summary: ExtendedSummary | null = null;
+  let topPaths: { path: string; view_count: number }[] = [];
+  let topReferrers: { source_label: string; session_count: number }[] = [];
+  let topUtm: {
+    utm_source: string;
+    utm_medium: string;
+    utm_campaign: string;
+    session_count: number;
+  }[] = [];
+  let topProducts: {
+    product_id: string;
+    view_count: number;
+    unique_sessions: number;
+  }[] = [];
   let sessions: SessionListRow[] = [];
-  let bouncePct: number | null = null;
-  let avgPagesPerSession: number | null = null;
 
   try {
     const service = createServiceClient();
 
-    const sumRes = await service.rpc("admin_analytics_summary", {
+    const extRes = await service.rpc("admin_analytics_extended_summary", {
       p_since: sinceIso,
     });
-    if (sumRes.error) {
-      if (/function|does not exist|schema cache/i.test(sumRes.error.message)) {
-        warning =
-          "Analytics tables or SQL functions not installed yet. Run supabase/migrations/024_site_analytics.sql in the Supabase SQL editor.";
+
+    if (extRes.error) {
+      if (/function|does not exist|schema cache/i.test(extRes.error.message)) {
+        needsMigration025 = true;
+        const sumRes = await service.rpc("admin_analytics_summary", {
+          p_since: sinceIso,
+        });
+        if (sumRes.error) {
+          if (/function|does not exist|schema cache/i.test(sumRes.error.message)) {
+            warning =
+              "Analytics not installed. Run supabase/migrations/024_site_analytics.sql then 025_analytics_admin_extended.sql in Supabase SQL editor.";
+          } else {
+            warning = sumRes.error.message;
+          }
+        } else {
+          const basic = sumRes.data as Record<string, number> | null;
+          summary = {
+            sessions: Number(basic?.sessions ?? 0),
+            unique_visitors: Number(basic?.unique_visitors ?? 0),
+            page_views: Number(basic?.page_views ?? 0),
+            avg_engaged_s: Number(basic?.avg_engaged_s ?? 0),
+            live_sessions: 0,
+            returning_visitors: 0,
+            marketing_opt_ins: 0,
+            bounce_sessions: 0,
+            product_views: 0,
+          };
+        }
       } else {
-        warning = sumRes.error.message;
+        warning = extRes.error.message;
       }
     } else {
-      summary = (sumRes.data ?? null) as AnalyticsSummary | null;
+      summary = extRes.data as ExtendedSummary;
     }
 
     if (!warning) {
-      const tpRes = await service.rpc("admin_analytics_top_paths", {
-        p_since: sinceIso,
-        p_limit: 20,
-      });
+      const [tpRes, refRes, utmRes, prodRes] = await Promise.all([
+        service.rpc("admin_analytics_top_paths", { p_since: sinceIso, p_limit: 25 }),
+        needsMigration025
+          ? Promise.resolve({ data: [], error: null })
+          : service.rpc("admin_analytics_top_referrers", {
+              p_since: sinceIso,
+              p_limit: 15,
+            }),
+        needsMigration025
+          ? Promise.resolve({ data: [], error: null })
+          : service.rpc("admin_analytics_top_utm", { p_since: sinceIso, p_limit: 15 }),
+        needsMigration025
+          ? Promise.resolve({ data: [], error: null })
+          : service.rpc("admin_analytics_top_products", {
+              p_since: sinceIso,
+              p_limit: 15,
+            }),
+      ]);
+
       if (!tpRes.error && Array.isArray(tpRes.data)) {
-        topPaths = tpRes.data as TopPathRow[];
+        topPaths = tpRes.data as typeof topPaths;
+      }
+      if (!refRes.error && Array.isArray(refRes.data)) {
+        topReferrers = refRes.data as typeof topReferrers;
+      }
+      if (!utmRes.error && Array.isArray(utmRes.data)) {
+        topUtm = utmRes.data as typeof topUtm;
+      }
+      if (!prodRes.error && Array.isArray(prodRes.data)) {
+        topProducts = prodRes.data as typeof topProducts;
       }
 
-      const { data: sRows, error: sErr } = await service
+      let sessionQuery = service
         .from("analytics_sessions")
-        .select(
-          "id, session_public_id, visitor_id, started_at, last_activity_at, landing_path, exit_path, referrer, utm_source, utm_medium, utm_campaign, page_view_count, engaged_ms, capture_email, marketing_opt_in"
-        )
+        .select(SESSION_SELECT)
         .gte("started_at", sinceIso)
         .order("last_activity_at", { ascending: false })
-        .limit(250);
+        .limit(500);
+
+      if (searchQ) {
+        sessionQuery = sessionQuery.or(
+          [
+            `capture_email.ilike.%${searchQ}%`,
+            `capture_name.ilike.%${searchQ}%`,
+            `referrer.ilike.%${searchQ}%`,
+            `visitor_id.ilike.%${searchQ}%`,
+            `landing_path.ilike.%${searchQ}%`,
+            `exit_path.ilike.%${searchQ}%`,
+            `utm_source.ilike.%${searchQ}%`,
+            `utm_medium.ilike.%${searchQ}%`,
+            `utm_campaign.ilike.%${searchQ}%`,
+            `client_ip.ilike.%${searchQ}%`,
+          ].join(",")
+        );
+      }
+
+      const { data: sRows, error: sErr } = await sessionQuery;
 
       if (sErr) {
         warning = sErr.message;
@@ -114,26 +209,33 @@ export default async function AdminAnalyticsPage({
         sessions = (sRows ?? []) as SessionListRow[];
       }
 
-      if (!warning && summary && summary.sessions > 0) {
-        avgPagesPerSession =
-          Number(summary.page_views ?? 0) / Number(summary.sessions);
-      }
-
-      if (!warning) {
-        const [totalSessionsRes, bounceSessionsRes] = await Promise.all([
+      if (summary && needsMigration025) {
+        const liveSince = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+        const [liveRes, bounceRes, optInRes, prodViewsRes] = await Promise.all([
           service
             .from("analytics_sessions")
             .select("id", { count: "exact", head: true })
-            .gte("started_at", sinceIso),
+            .gte("last_activity_at", liveSince),
           service
             .from("analytics_sessions")
             .select("id", { count: "exact", head: true })
             .gte("started_at", sinceIso)
             .lte("page_view_count", 1),
+          service
+            .from("analytics_sessions")
+            .select("id", { count: "exact", head: true })
+            .gte("started_at", sinceIso)
+            .eq("marketing_opt_in", true),
+          service
+            .from("analytics_page_views")
+            .select("id", { count: "exact", head: true })
+            .gte("viewed_at", sinceIso)
+            .not("product_id", "is", null),
         ]);
-        const tot = totalSessionsRes.count ?? 0;
-        const bounced = bounceSessionsRes.count ?? 0;
-        if (tot > 0) bouncePct = (bounced / tot) * 100;
+        summary.live_sessions = liveRes.count ?? 0;
+        summary.bounce_sessions = bounceRes.count ?? 0;
+        summary.marketing_opt_ins = optInRes.count ?? 0;
+        summary.product_views = prodViewsRes.count ?? 0;
       }
     }
   } catch (e) {
@@ -143,25 +245,44 @@ export default async function AdminAnalyticsPage({
         : "Could not connect to analytics (check SUPABASE_SERVICE_ROLE_KEY).";
   }
 
-  const qBase = (d: number) =>
-    sessionOpen
-      ? `/admin/analytics?days=${d}&session=${encodeURIComponent(sessionOpen)}`
-      : `/admin/analytics?days=${d}`;
+  const bouncePct =
+    summary && summary.sessions > 0
+      ? (summary.bounce_sessions / summary.sessions) * 100
+      : null;
+  const avgPagesPerSession =
+    summary && summary.sessions > 0
+      ? summary.page_views / summary.sessions
+      : null;
+
+  const qBase = (d: number) => {
+    const p = new URLSearchParams();
+    p.set("days", String(d));
+    if (sessionOpen) p.set("session", sessionOpen);
+    if (searchQ) p.set("q", searchQ);
+    return `/admin/analytics?${p.toString()}`;
+  };
+
+  const sessionLink = (publicId: string) => {
+    const p = new URLSearchParams();
+    p.set("days", String(days));
+    p.set("session", publicId);
+    if (searchQ) p.set("q", searchQ);
+    return `/admin/analytics?${p.toString()}`;
+  };
 
   return (
     <div className="space-y-8">
       <AnalyticsSessionShell />
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[10px] uppercase tracking-[0.28em] text-white/35">
             Traffic
           </p>
           <h1 className="font-display text-3xl text-white">Visitor analytics</h1>
           <p className="mt-1 max-w-2xl text-xs text-white/45">
-            First-party traffic: landing + exit URLs, referrer and UTM, full page
-            sequence with dwell time and active-tab pulses, CRM notes/tags, and CSV
-            export. Only store marketing contacts you are legally allowed to use.
+            Every session: source, device, full URL path, dwell per page, active-tab
+            time, product views, and CRM fields. Click a row for the full journey.
           </p>
         </div>
         <a
@@ -173,7 +294,7 @@ export default async function AdminAnalyticsPage({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {[1, 7, 14, 30].map((d) => (
+        {[1, 7, 14, 30, 90].map((d) => (
           <Link
             key={d}
             href={qBase(d)}
@@ -188,51 +309,57 @@ export default async function AdminAnalyticsPage({
         ))}
       </div>
 
+      <Suspense fallback={null}>
+        <AdminAnalyticsSearch days={days} />
+      </Suspense>
+
       {warning ? (
         <div className="rounded-sm border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-xs text-yellow-200">
           {warning}
         </div>
-      ) : (
-        <div className="rounded-sm border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-xs text-sky-100/90">
-          <p className="font-medium text-sky-50/95">Where this data lives</p>
-          <p className="mt-1 text-sky-100/75">
-            Events are written to your Supabase project (no third-party analytics
-            script). Use <span className="font-mono text-[11px]">/admin/analytics</span>{" "}
-            or the sidebar{" "}
-            <span className="font-semibold text-white/90">Visitor analytics</span>{" "}
-            tab — same place as the dashboard promo card.
-          </p>
+      ) : needsMigration025 ? (
+        <div className="rounded-sm border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-100">
+          Run{" "}
+          <span className="font-mono">025_analytics_admin_extended.sql</span> in
+          Supabase for live-visitor counts, referrer/UTM/product breakdowns, and richer
+          summary cards.
         </div>
-      )}
+      ) : null}
 
       {!warning && summary ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
+            {
+              k: "Live now (15m)",
+              v: String(summary.live_sessions ?? 0),
+              highlight: (summary.live_sessions ?? 0) > 0,
+            },
             { k: "Sessions", v: String(summary.sessions ?? 0) },
             { k: "Unique visitors", v: String(summary.unique_visitors ?? 0) },
+            { k: "Returning visitors", v: String(summary.returning_visitors ?? 0) },
             { k: "Page views", v: String(summary.page_views ?? 0) },
+            { k: "Product page views", v: String(summary.product_views ?? 0) },
             {
               k: "Avg engaged / session",
               v: `${(Number(summary.avg_engaged_s) || 0).toFixed(1)}s`,
             },
             {
               k: "Avg pages / session",
-              v:
-                avgPagesPerSession != null
-                  ? avgPagesPerSession.toFixed(2)
-                  : "—",
+              v: avgPagesPerSession != null ? avgPagesPerSession.toFixed(2) : "—",
             },
             {
-              k: "Bounce rate (1 page)",
-              v:
-                bouncePct != null
-                  ? `${bouncePct.toFixed(1)}%`
-                  : "—",
+              k: "Bounce (1 page)",
+              v: bouncePct != null ? `${bouncePct.toFixed(1)}%` : "—",
             },
+            { k: "Marketing opt-ins", v: String(summary.marketing_opt_ins ?? 0) },
           ].map((c) => (
             <div
               key={c.k}
-              className="rounded-sm border border-white/10 bg-black/40 px-4 py-3"
+              className={`rounded-sm border px-4 py-3 ${
+                "highlight" in c && c.highlight
+                  ? "border-emerald-400/40 bg-emerald-500/[0.08]"
+                  : "border-white/10 bg-black/40"
+              }`}
             >
               <p className="text-[10px] uppercase tracking-[0.22em] text-white/35">
                 {c.k}
@@ -243,108 +370,163 @@ export default async function AdminAnalyticsPage({
         </div>
       ) : null}
 
-      {!warning && topPaths.length > 0 ? (
-        <div>
-          <h2 className="text-sm font-medium uppercase tracking-[0.2em] text-white/55">
-            Top pages
-          </h2>
-          <ul className="mt-3 divide-y divide-white/10 rounded-sm border border-white/10">
-            {topPaths.map((row) => (
-              <li
-                key={row.path}
-                className="flex items-center justify-between gap-3 px-3 py-2 text-xs"
-              >
-                <span className="truncate font-mono text-white/80">{row.path}</span>
-                <span className="shrink-0 tabular-nums text-gold-200/90">
-                  {row.view_count} views
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {!warning ? (
+        <AdminAnalyticsBreakdowns
+          topPaths={topPaths}
+          topReferrers={topReferrers}
+          topUtm={topUtm}
+          topProducts={topProducts}
+        />
       ) : null}
 
       {!warning ? (
         <div>
-          <h2 className="text-sm font-medium uppercase tracking-[0.2em] text-white/55">
-            Recent sessions
-          </h2>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium uppercase tracking-[0.2em] text-white/55">
+              Sessions
+              {searchQ ? (
+                <span className="ml-2 font-normal normal-case text-white/40">
+                  matching &ldquo;{searchQ}&rdquo;
+                </span>
+              ) : null}
+            </h2>
+            <p className="text-[10px] text-white/35">
+              Showing {sessions.length}
+              {sessions.length >= 500 ? "+" : ""} · newest activity first
+            </p>
+          </div>
           <div className="mt-3 overflow-x-auto rounded-sm border border-white/10">
-            <table className="w-full min-w-[960px] text-left text-xs">
+            <table className="w-full min-w-[1280px] text-left text-xs">
               <thead>
-                <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.18em] text-white/40">
-                  <th className="px-3 py-2">Last active</th>
-                  <th className="px-3 py-2">Session</th>
-                  <th className="px-3 py-2">Visitor</th>
-                  <th className="px-3 py-2">Views</th>
-                  <th className="px-3 py-2">Engaged</th>
-                  <th className="px-3 py-2">Landing</th>
-                  <th className="px-3 py-2">Exit</th>
-                  <th className="px-3 py-2">UTM</th>
-                  <th className="px-3 py-2">Contact</th>
-                  <th className="px-3 py-2" />
+                <tr className="border-b border-white/10 text-[10px] uppercase tracking-[0.16em] text-white/40">
+                  <th className="px-2 py-2">Status</th>
+                  <th className="px-2 py-2">Started</th>
+                  <th className="px-2 py-2">Last active</th>
+                  <th className="px-2 py-2">Duration</th>
+                  <th className="px-2 py-2">Source</th>
+                  <th className="px-2 py-2">Device</th>
+                  <th className="px-2 py-2">Views</th>
+                  <th className="px-2 py-2">Engaged</th>
+                  <th className="px-2 py-2">Landing</th>
+                  <th className="px-2 py-2">Exit</th>
+                  <th className="px-2 py-2">UTM</th>
+                  <th className="px-2 py-2">Contact / tags</th>
+                  <th className="px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {sessions.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-3 py-8 text-center text-white/45">
-                      No sessions in this window yet. Browse the storefront in another
-                      tab to generate data.
+                    <td colSpan={13} className="px-3 py-8 text-center text-white/45">
+                      No sessions in this window
+                      {searchQ ? " for that search" : ""}. Browse the storefront to
+                      generate data.
                     </td>
                   </tr>
                 ) : (
-                  sessions.map((s) => (
-                    <tr key={s.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                      <td className="whitespace-nowrap px-3 py-2 text-white/70">
-                        {new Date(s.last_activity_at).toLocaleString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-white/60">
-                        {formatMs(
-                          Math.max(
-                            0,
-                            new Date(s.last_activity_at).getTime() -
-                              new Date(s.started_at).getTime()
-                          )
-                        )}
-                      </td>
-                      <td className="max-w-[120px] truncate px-3 py-2 font-mono text-[10px] text-white/55">
-                        {s.visitor_id.slice(0, 13)}…
-                      </td>
-                      <td className="px-3 py-2 tabular-nums text-white/80">
-                        {s.page_view_count}
-                      </td>
-                      <td className="px-3 py-2 text-white/70">{formatMs(s.engaged_ms)}</td>
-                      <td className="max-w-[180px] truncate px-3 py-2 text-white/70">
-                        {s.landing_path ?? "—"}
-                      </td>
-                      <td className="max-w-[180px] truncate px-3 py-2 text-white/55">
-                        {s.exit_path ?? "—"}
-                      </td>
-                      <td className="max-w-[140px] truncate px-3 py-2 text-white/50">
-                        {[s.utm_source, s.utm_medium].filter(Boolean).join("/") || "—"}
-                      </td>
-                      <td className="max-w-[140px] truncate px-3 py-2 text-white/60">
-                        {s.capture_email ?? "—"}
-                        {s.marketing_opt_in ? (
-                          <span className="ml-1 text-gold-300/90">· opt-in</span>
-                        ) : null}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2">
-                        <Link
-                          href={`/admin/analytics?days=${days}&session=${encodeURIComponent(s.session_public_id)}`}
-                          className="text-[10px] uppercase tracking-[0.18em] text-gold-200/90 underline decoration-gold-500/40 underline-offset-2 hover:text-gold-100"
+                  sessions.map((s) => {
+                    const ua = parseUserAgent(s.user_agent);
+                    const live = isLiveSession(s.last_activity_at);
+                    const tags = Array.isArray(s.admin_tags) ? s.admin_tags : [];
+                    return (
+                      <tr
+                        key={s.id}
+                        className="border-b border-white/5 hover:bg-white/[0.02]"
+                      >
+                        <td className="whitespace-nowrap px-2 py-2">
+                          {live ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300">
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                              Live
+                            </span>
+                          ) : (
+                            <span className="text-white/30">—</span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 text-white/55">
+                          {new Date(s.started_at).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 text-white/70">
+                          {new Date(s.last_activity_at).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 text-white/60">
+                          {formatMs(
+                            Math.max(
+                              0,
+                              new Date(s.last_activity_at).getTime() -
+                                new Date(s.started_at).getTime()
+                            )
+                          )}
+                        </td>
+                        <td
+                          className="max-w-[100px] truncate px-2 py-2 text-white/65"
+                          title={s.referrer ?? undefined}
                         >
-                          Journey + CRM
-                        </Link>
-                      </td>
-                    </tr>
-                  ))
+                          {referrerLabel(s.referrer)}
+                        </td>
+                        <td className="max-w-[120px] truncate px-2 py-2 text-white/50">
+                          {ua.browser}
+                          <span className="text-white/30"> · </span>
+                          {ua.os}
+                          {s.viewport_w && s.viewport_h ? (
+                            <span className="block text-[10px] text-white/35">
+                              {s.viewport_w}×{s.viewport_h}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-2 py-2 tabular-nums text-white/80">
+                          {s.page_view_count}
+                        </td>
+                        <td className="px-2 py-2 text-white/70">
+                          {formatMs(s.engaged_ms)}
+                        </td>
+                        <td
+                          className="max-w-[140px] truncate px-2 py-2 font-mono text-[10px] text-white/70"
+                          title={pathWithQuery(s.landing_path, s.landing_query)}
+                        >
+                          {pathWithQuery(s.landing_path, s.landing_query)}
+                        </td>
+                        <td className="max-w-[120px] truncate px-2 py-2 font-mono text-[10px] text-white/55">
+                          {s.exit_path ?? "—"}
+                        </td>
+                        <td className="max-w-[120px] truncate px-2 py-2 text-white/50">
+                          {[s.utm_source, s.utm_medium, s.utm_campaign]
+                            .filter(Boolean)
+                            .join(" / ") || "—"}
+                        </td>
+                        <td className="max-w-[140px] truncate px-2 py-2 text-white/60">
+                          {s.capture_email ?? s.capture_name ?? "—"}
+                          {tags.length > 0 ? (
+                            <span className="mt-0.5 block text-[10px] text-gold-300/80">
+                              {tags.slice(0, 2).join(", ")}
+                              {tags.length > 2 ? "…" : ""}
+                            </span>
+                          ) : null}
+                          {s.marketing_opt_in ? (
+                            <span className="text-gold-300/90"> · opt-in</span>
+                          ) : null}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2">
+                          <Link
+                            href={sessionLink(s.session_public_id)}
+                            className="text-[10px] uppercase tracking-[0.16em] text-gold-200/90 underline decoration-gold-500/40 underline-offset-2 hover:text-gold-100"
+                          >
+                            Full journey →
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

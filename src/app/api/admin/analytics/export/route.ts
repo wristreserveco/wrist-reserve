@@ -33,7 +33,7 @@ export async function GET(request: Request) {
   const { data: rows, error } = await service
     .from("analytics_sessions")
     .select(
-      "session_public_id, visitor_id, started_at, last_activity_at, landing_path, exit_path, referrer, utm_source, utm_medium, utm_campaign, page_view_count, engaged_ms, capture_email, capture_name, marketing_opt_in, admin_notes, admin_tags, client_ip, user_agent"
+      "session_public_id, visitor_id, started_at, last_activity_at, landing_path, landing_query, exit_path, referrer, utm_source, utm_medium, utm_campaign, utm_content, utm_term, page_view_count, engaged_ms, capture_email, capture_name, marketing_opt_in, admin_notes, admin_tags, client_ip, user_agent, viewport_w, viewport_h, browser_language, timezone"
     )
     .gte("started_at", since.toISOString())
     .order("started_at", { ascending: false })
@@ -49,11 +49,14 @@ export async function GET(request: Request) {
     "started_at",
     "last_activity_at",
     "landing_path",
+    "landing_query",
     "exit_path",
     "referrer",
     "utm_source",
     "utm_medium",
     "utm_campaign",
+    "utm_content",
+    "utm_term",
     "page_views",
     "engaged_seconds",
     "capture_email",
@@ -63,6 +66,10 @@ export async function GET(request: Request) {
     "admin_tags",
     "client_ip",
     "user_agent",
+    "viewport_w",
+    "viewport_h",
+    "browser_language",
+    "timezone",
   ];
 
   const lines = [header.join(",")];
@@ -76,11 +83,14 @@ export async function GET(request: Request) {
         r.started_at,
         r.last_activity_at,
         r.landing_path,
+        r.landing_query,
         r.exit_path,
         r.referrer,
         r.utm_source,
         r.utm_medium,
         r.utm_campaign,
+        r.utm_content,
+        r.utm_term,
         String(r.page_view_count ?? 0),
         String(Math.round(engagedS * 10) / 10),
         r.capture_email,
@@ -90,6 +100,10 @@ export async function GET(request: Request) {
         tags,
         r.client_ip,
         r.user_agent,
+        r.viewport_w != null ? String(r.viewport_w) : "",
+        r.viewport_h != null ? String(r.viewport_h) : "",
+        r.browser_language,
+        r.timezone,
       ]
         .map((c) => csvEscape(c == null ? "" : String(c)))
         .join(",")

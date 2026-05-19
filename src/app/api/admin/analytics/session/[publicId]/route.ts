@@ -52,7 +52,26 @@ export async function GET(
     return NextResponse.json({ error: vErr.message }, { status: 500 });
   }
 
-  return NextResponse.json({ session, views: views ?? [] });
+  const visitorId = String(session.visitor_id ?? "");
+  let siblingSessions: Record<string, unknown>[] = [];
+  if (visitorId) {
+    const { data: siblings } = await service
+      .from("analytics_sessions")
+      .select(
+        "session_public_id, started_at, last_activity_at, page_view_count, landing_path, exit_path, referrer, engaged_ms, capture_email"
+      )
+      .eq("visitor_id", visitorId)
+      .neq("session_public_id", id)
+      .order("started_at", { ascending: false })
+      .limit(25);
+    siblingSessions = siblings ?? [];
+  }
+
+  return NextResponse.json({
+    session,
+    views: views ?? [],
+    siblingSessions,
+  });
 }
 
 export async function PATCH(
