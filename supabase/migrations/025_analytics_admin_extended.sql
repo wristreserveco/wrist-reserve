@@ -19,7 +19,7 @@ as $$
   bounced as (
     select count(*)::bigint as n from sess where page_view_count <= 1
   ),
-  returning as (
+  repeat_visitors as (
     select count(*)::bigint as n
     from (
       select visitor_id
@@ -47,7 +47,7 @@ as $$
         from public.analytics_sessions
         where last_activity_at >= now() - interval '15 minutes'
       ),
-    'returning_visitors', (select n from returning),
+    'returning_visitors', (select n from repeat_visitors),
     'marketing_opt_ins',
       (select count(*)::bigint from sess where marketing_opt_in = true),
     'bounce_sessions', (select n from bounced),
