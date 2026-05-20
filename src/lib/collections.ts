@@ -1,6 +1,6 @@
 import type { Category, Product } from "@/lib/types";
 import { getRootCategory, productIsShopBuyable } from "@/lib/products";
-import { pickCollectionCoverImage } from "@/lib/collections/stock-covers";
+import { collectionCoverForBrand } from "@/lib/collections/cover-overrides";
 
 export type BrandCollectionCard = {
   id: string;
@@ -54,9 +54,8 @@ function productsForBrand(
 }
 
 /**
- * Homepage "Find your piece" tiles — model/stock covers matched to your inventory
- * (Big Bang–style sport shots, Sub/Daytona/Nautilus heroes, etc.), with your
- * uploaded photos as fallback. No seed Wikipedia listing thumbs.
+ * Homepage "Find your piece" — original category stock photos from the DB,
+ * with a small fixed override list (Datejust, Nautilus, Santos, Big Bang, RM 030).
  */
 export function buildBrandCollectionCards(
   products: Product[],
@@ -70,11 +69,7 @@ export function buildBrandCollectionCards(
     const inventory = productsForBrand(brand, products, categories);
     if (inventory.length === 0) continue;
 
-    const cover = pickCollectionCoverImage(
-      brand.slug,
-      inventory,
-      brand.image_url
-    );
+    const cover = collectionCoverForBrand(brand.slug, brand.image_url);
     if (!cover) continue;
 
     cards.push({

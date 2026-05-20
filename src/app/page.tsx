@@ -173,8 +173,7 @@ export default async function HomePage() {
                 Find your piece
               </h2>
               <p className="mt-2 max-w-md text-sm text-white/45">
-                In-stock brands only — covers matched to the models you carry (your
-                uploads when you have them).
+                In-stock brands only — classic reference photos on each tile.
               </p>
             </div>
             <Link
