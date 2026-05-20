@@ -1,12 +1,6 @@
 import Link from "next/link";
 
 type RefRow = { source_label: string; session_count: number };
-type UtmRow = {
-  utm_source: string;
-  utm_medium: string;
-  utm_campaign: string;
-  session_count: number;
-};
 type ProductRow = {
   product_id: string;
   view_count: number;
@@ -17,18 +11,15 @@ type PathRow = { path: string; view_count: number };
 export function AdminAnalyticsBreakdowns({
   topPaths,
   topReferrers,
-  topUtm,
   topProducts,
 }: {
   topPaths: PathRow[];
   topReferrers: RefRow[];
-  topUtm: UtmRow[];
   topProducts: ProductRow[];
 }) {
   const hasAny =
     topPaths.length > 0 ||
     topReferrers.length > 0 ||
-    topUtm.length > 0 ||
     topProducts.length > 0;
 
   if (!hasAny) return null;
@@ -47,30 +38,6 @@ export function AdminAnalyticsBreakdowns({
                 <span className="shrink-0 tabular-nums text-gold-200/90">
                   {row.session_count} sessions
                 </span>
-              </li>
-            ))}
-          </ul>
-        </BreakdownCard>
-      ) : null}
-
-      {topUtm.length > 0 ? (
-        <BreakdownCard title="UTM campaigns">
-          <ul className="divide-y divide-white/10">
-            {topUtm.map((row) => (
-              <li
-                key={`${row.utm_source}-${row.utm_medium}-${row.utm_campaign}`}
-                className="py-2 text-xs"
-              >
-                <p className="text-white/85">
-                  <span className="text-gold-200/90">{row.utm_source}</span>
-                  <span className="text-white/35"> · </span>
-                  {row.utm_medium}
-                  <span className="text-white/35"> · </span>
-                  {row.utm_campaign}
-                </p>
-                <p className="mt-0.5 tabular-nums text-white/45">
-                  {row.session_count} sessions
-                </p>
               </li>
             ))}
           </ul>

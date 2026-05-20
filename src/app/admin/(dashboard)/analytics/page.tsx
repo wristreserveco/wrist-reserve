@@ -6,6 +6,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { AnalyticsSessionShell } from "@/components/admin/AnalyticsSessionShell";
 import { AdminAnalyticsBreakdowns } from "@/components/admin/AdminAnalyticsBreakdowns";
 import { AdminAnalyticsSearch } from "@/components/admin/AdminAnalyticsSearch";
+import { AdminMarketingHub } from "@/components/admin/AdminMarketingHub";
+import { buildMarketingInsights } from "@/lib/analytics/marketing";
 import {
   formatMs,
   isLiveSession,
@@ -90,12 +92,6 @@ export default async function AdminAnalyticsPage({
   let summary: ExtendedSummary | null = null;
   let topPaths: { path: string; view_count: number }[] = [];
   let topReferrers: { source_label: string; session_count: number }[] = [];
-  let topUtm: {
-    utm_source: string;
-    utm_medium: string;
-    utm_campaign: string;
-    session_count: number;
-  }[] = [];
   let topProducts: {
     product_id: string;
     view_count: number;
@@ -145,7 +141,7 @@ export default async function AdminAnalyticsPage({
     }
 
     if (!warning) {
-      const [tpRes, refRes, utmRes, prodRes] = await Promise.all([
+      const [tpRes, refRes, prodRes] = await Promise.all([
         service.rpc("admin_analytics_top_paths", { p_since: sinceIso, p_limit: 25 }),
         needsMigration025
           ? Promise.resolve({ data: [], error: null })
@@ -153,9 +149,6 @@ export default async function AdminAnalyticsPage({
               p_since: sinceIso,
               p_limit: 15,
             }),
-        needsMigration025
-          ? Promise.resolve({ data: [], error: null })
-          : service.rpc("admin_analytics_top_utm", { p_since: sinceIso, p_limit: 15 }),
         needsMigration025
           ? Promise.resolve({ data: [], error: null })
           : service.rpc("admin_analytics_top_products", {
@@ -169,9 +162,6 @@ export default async function AdminAnalyticsPage({
       }
       if (!refRes.error && Array.isArray(refRes.data)) {
         topReferrers = refRes.data as typeof topReferrers;
-      }
-      if (!utmRes.error && Array.isArray(utmRes.data)) {
-        topUtm = utmRes.data as typeof topUtm;
       }
       if (!prodRes.error && Array.isArray(prodRes.data)) {
         topProducts = prodRes.data as typeof topProducts;
@@ -271,6 +261,13 @@ export default async function AdminAnalyticsPage({
     return `/admin/analytics?${p.toString()}`;
   };
 
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+    "https://www.wristreserve.co";
+  const marketingInsights = !warning
+    ? buildMarketingInsights(sessions)
+    : null;
+
   return (
     <div className="space-y-8">
       <AnalyticsSessionShell />
@@ -282,8 +279,8 @@ export default async function AdminAnalyticsPage({
           </p>
           <h1 className="font-display text-3xl text-white">Visitor analytics</h1>
           <p className="mt-1 max-w-2xl text-xs text-white/45">
-            Every session: source, device, full URL path, dwell per page, active-tab
-            time, product views, and CRM fields. Click a row for the full journey.
+            Raw traffic plus a marketing playbook: tag your links, see which campaigns
+            work, export hot leads, and follow up before they go cold.
           </p>
         </div>
         <a
@@ -313,6 +310,14 @@ export default async function AdminAnalyticsPage({
       <Suspense fallback={null}>
         <AdminAnalyticsSearch days={days} />
       </Suspense>
+
+      {!warning && marketingInsights ? (
+        <AdminMarketingHub
+          insights={marketingInsights}
+          siteUrl={siteUrl}
+          days={days}
+        />
+      ) : null}
 
       {warning ? (
         <div className="rounded-sm border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-xs text-yellow-200">
@@ -374,7 +379,6 @@ export default async function AdminAnalyticsPage({
         <AdminAnalyticsBreakdowns
           topPaths={topPaths}
           topReferrers={topReferrers}
-          topUtm={topUtm}
           topProducts={topProducts}
         />
       ) : null}
