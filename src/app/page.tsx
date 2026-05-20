@@ -5,7 +5,9 @@ import { FeaturedProductCarousel } from "@/components/FeaturedProductCarousel";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
 import { buildCategorySlides, type HeroCategorySlide } from "@/lib/categories";
+import { buildBrandCollectionCards } from "@/lib/collections";
 import { mapCategory, mapHeroSlide, mapProduct } from "@/lib/products";
+import { BrandCollectionCarousel } from "@/components/BrandCollectionCarousel";
 import type { Category, HeroSlide, Product } from "@/lib/types";
 import { TIER_META } from "@/lib/tiers";
 
@@ -17,7 +19,7 @@ async function loadHomeData(): Promise<{
   tierSpotlight: HeroSlide;
   featured: Product[];
   sold: Product[];
-  parentCategories: Category[];
+  brandCollections: ReturnType<typeof buildBrandCollectionCards>;
   superTierSpotlight: Product[];
   configured: boolean;
 }> {
@@ -42,7 +44,7 @@ async function loadHomeData(): Promise<{
       tierSpotlight: fallbackTierSpotlight,
       featured: [],
       sold: [],
-      parentCategories: [],
+      brandCollections: [],
       superTierSpotlight: [],
       configured: false,
     };
@@ -70,28 +72,7 @@ async function loadHomeData(): Promise<{
   const categories: Category[] = (catRows ?? []).map((row) =>
     mapCategory(row as Record<string, unknown>)
   );
-  // Only surface brands that actually have inventory you can buy right now.
-  // A product counts if it's linked (directly or via a sub-category) to the
-  // brand and still listed as available. Sold-out-only brands get hidden so
-  // the collections grid never leads buyers to an empty shelf.
-  const liveCategoryIds = new Set<string>();
-  for (const product of allProducts) {
-    if (product.status === "sold") continue;
-    if (!product.category_id) continue;
-    liveCategoryIds.add(product.category_id);
-  }
-  const brandsWithInventory = new Set<string>();
-  for (const cat of categories) {
-    if (!liveCategoryIds.has(cat.id)) continue;
-    // If the hit is a sub-category, promote to its parent brand.
-    const brandId = cat.parent_id ?? cat.id;
-    brandsWithInventory.add(brandId);
-  }
-  const parentCategories = categories
-    .filter(
-      (c) => !c.parent_id && c.image_url && brandsWithInventory.has(c.id),
-    )
-    .slice(0, 8);
+  const brandCollections = buildBrandCollectionCards(allProducts, categories);
 
   // hero_slides table is added in migration 007 — tolerate it not existing yet.
   let adminHeroSlides: HeroSlide[] = [];
@@ -154,7 +135,7 @@ async function loadHomeData(): Promise<{
     tierSpotlight,
     featured,
     sold,
-    parentCategories,
+    brandCollections,
     superTierSpotlight,
     configured: true,
   };
@@ -167,7 +148,7 @@ export default async function HomePage() {
     tierSpotlight,
     featured,
     sold,
-    parentCategories,
+    brandCollections,
     superTierSpotlight,
     configured,
   } = await loadHomeData();
@@ -181,7 +162,7 @@ export default async function HomePage() {
         tierSpotlight={tierSpotlight}
       />
 
-      {parentCategories.length > 0 ? (
+      {brandCollections.length > 0 ? (
         <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
           <div className="flex items-end justify-between gap-4">
             <div>
@@ -191,42 +172,23 @@ export default async function HomePage() {
               <h2 className="mt-3 font-display text-3xl text-white sm:text-4xl">
                 Find your piece
               </h2>
+              <p className="mt-2 max-w-md text-sm text-white/45">
+                Only brands you actually have in stock — covers from your listings.
+              </p>
             </div>
             <Link
               href="/shop"
-              className="hidden text-xs uppercase tracking-[0.25em] text-white/55 transition hover:text-gold-200 sm:block"
+              className="hidden shrink-0 text-xs uppercase tracking-[0.25em] text-white/55 transition hover:text-gold-200 sm:block"
             >
               All collections →
             </Link>
           </div>
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {parentCategories.map((c) => (
-              <Link
-                key={c.id}
-                href={`/shop?category=${c.slug}`}
-                className="group relative block aspect-[4/5] overflow-hidden rounded-sm border border-white/10 bg-zinc-950"
-              >
-                {c.image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={c.image_url}
-                    alt={c.name}
-                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                  />
-                ) : null}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
-                <div className="absolute inset-x-0 bottom-0 p-5">
-                  <p className="font-display text-xl text-white">{c.name}</p>
-                  {c.tagline ? (
-                    <p className="mt-1 text-xs text-white/60">{c.tagline}</p>
-                  ) : null}
-                  <p className="mt-3 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.22em] text-gold-300">
-                    Explore →
-                  </p>
-                </div>
-              </Link>
-            ))}
+          <div className="mt-10">
+            <BrandCollectionCarousel cards={brandCollections} />
           </div>
+          <p className="mt-4 text-center text-[10px] uppercase tracking-[0.22em] text-white/30 sm:hidden">
+            Swipe for more brands →
+          </p>
         </section>
       ) : null}
 
