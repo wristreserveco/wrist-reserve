@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { HeroCarousel } from "@/components/HeroCarousel";
 import { ProductGrid } from "@/components/ProductGrid";
+import { FeaturedProductCarousel } from "@/components/FeaturedProductCarousel";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
 import { buildCategorySlides, type HeroCategorySlide } from "@/lib/categories";
@@ -252,7 +253,7 @@ export default async function HomePage() {
           </p>
         ) : null}
         <div className="mt-14">
-          <ProductGrid products={featured} />
+          <FeaturedProductCarousel products={featured} />
         </div>
       </section>
 

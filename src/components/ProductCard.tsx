@@ -14,6 +14,8 @@ import { useCanAutoplay } from "@/lib/media/playback-policy";
 interface ProductCardProps {
   product: Product;
   index?: number;
+  /** Override Next/Image `sizes` — use fixed width in horizontal carousels. */
+  imageSizes?: string;
 }
 
 /**
@@ -32,7 +34,11 @@ interface ProductCardProps {
  *
  * Result: ~0 bytes per card on first paint, vs ~5MB previously.
  */
-export function ProductCard({ product, index = 0 }: ProductCardProps) {
+export function ProductCard({
+  product,
+  index = 0,
+  imageSizes = "(max-width: 768px) 100vw, 33vw",
+}: ProductCardProps) {
   const images = parseMediaUrls(product.media_urls);
   const cover = images[0];
   const sold = product.status === "sold";
@@ -127,7 +133,7 @@ export function ProductCard({ product, index = 0 }: ProductCardProps) {
               fill
               priority={index < 3}
               className="object-cover transition duration-700 group-hover:scale-[1.03]"
-              sizes="(max-width: 768px) 100vw, 33vw"
+              sizes={imageSizes}
               placeholder="blur"
               blurDataURL={LUXE_BLUR_DATA_URL}
               unoptimized={shouldUnoptimize(poster)}
