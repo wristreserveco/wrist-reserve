@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -45,6 +45,123 @@ function normalizeAdminSlide(s: HeroSlide): NormalizedSlide {
     ctaHref: s.cta_href ?? "/shop",
     variants: [],
   };
+}
+
+function HeroVariantStrip({
+  slideId,
+  slideTitle,
+  ctaHref,
+  variants,
+}: {
+  slideId: string;
+  slideTitle: string;
+  ctaHref: string;
+  variants: { src: string; label?: string; href?: string }[];
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollHints = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    setCanScrollLeft(scrollLeft > 6);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 6);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollLeft = 0;
+    updateScrollHints();
+    el.addEventListener("scroll", updateScrollHints, { passive: true });
+    const ro = new ResizeObserver(updateScrollHints);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", updateScrollHints);
+      ro.disconnect();
+    };
+  }, [slideId, variants, updateScrollHints]);
+
+  const scrollBy = (dir: -1 | 1) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const step = Math.max(120, Math.round(el.clientWidth * 0.72));
+    el.scrollBy({ left: dir * step, behavior: "smooth" });
+  };
+
+  return (
+    <div className="relative w-full lg:ml-auto lg:max-w-md">
+      {canScrollLeft ? (
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex w-12 items-center bg-gradient-to-r from-black/85 via-black/50 to-transparent pl-0.5 sm:w-14">
+          <button
+            type="button"
+            onClick={() => scrollBy(-1)}
+            className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-black/70 text-lg text-white/90 backdrop-blur transition hover:border-gold-400/45 hover:text-gold-200"
+            aria-label="Scroll watches left"
+          >
+            ‹
+          </button>
+        </div>
+      ) : null}
+
+      <div
+        ref={scrollRef}
+        className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {variants.map((v, i) => {
+          const tileHref = v.href ?? ctaHref;
+          return (
+            <motion.div
+              key={`${slideId}-${v.src}-${i}`}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 + i * 0.08 }}
+              className="w-[min(28vw,120px)] shrink-0 snap-start sm:w-[120px]"
+            >
+              <Link
+                href={tileHref}
+                className="group block outline-none ring-gold-500/30 focus-visible:ring-2"
+                aria-label={
+                  v.label ? `${v.label} — view in shop` : `Shop ${slideTitle}`
+                }
+              >
+                <div className="relative aspect-[3/4] overflow-hidden rounded-sm border border-white/10 bg-white/[0.02]">
+                  <Image
+                    src={v.src}
+                    alt={v.label ?? slideTitle}
+                    fill
+                    unoptimized={remoteImageUnoptimized(v.src)}
+                    sizes="120px"
+                    className="object-cover opacity-90 transition duration-700 group-hover:scale-105 group-hover:opacity-100"
+                  />
+                </div>
+                {v.label ? (
+                  <p className="mt-1.5 text-center text-[10px] uppercase tracking-[0.18em] text-white/45 transition group-hover:text-gold-200/90">
+                    {v.label}
+                  </p>
+                ) : null}
+              </Link>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {canScrollRight ? (
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 flex w-12 items-center justify-end bg-gradient-to-l from-black/85 via-black/50 to-transparent pr-0.5 sm:w-14">
+          <button
+            type="button"
+            onClick={() => scrollBy(1)}
+            className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-black/70 text-lg text-white/90 backdrop-blur transition hover:border-gold-400/45 hover:text-gold-200"
+            aria-label="Scroll watches right"
+          >
+            ›
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function normalizeCategorySlide(s: HeroCategorySlide): NormalizedSlide {
@@ -211,52 +328,13 @@ export function HeroCarousel({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -18 }}
                   transition={{ duration: 0.7, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-                  className={
-                    slide.variants.length >= 4
-                      ? "grid grid-cols-4 gap-3 lg:ml-auto lg:max-w-md"
-                      : "flex flex-wrap justify-end gap-3 lg:ml-auto lg:max-w-md"
-                  }
                 >
-                  {slide.variants.map((v, i) => {
-                    const tileHref = v.href ?? slide.ctaHref;
-                    return (
-                      <motion.div
-                        key={`${slide.id}-${v.src}-${i}`}
-                        initial={{ opacity: 0, y: 16 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5, delay: 0.2 + i * 0.08 }}
-                        className={`group relative ${
-                          slide.variants.length < 4 ? "w-[min(28vw,120px)] shrink-0" : ""
-                        }`}
-                      >
-                        <Link
-                          href={tileHref}
-                          className="block cursor-pointer outline-none ring-gold-500/30 focus-visible:ring-2"
-                          aria-label={
-                            v.label
-                              ? `${v.label} — view in shop`
-                              : `Shop ${slide.title}`
-                          }
-                        >
-                          <div className="relative aspect-[3/4] overflow-hidden rounded-sm border border-white/10 bg-white/[0.02]">
-                            <Image
-                              src={v.src}
-                              alt={v.label ?? slide.title}
-                              fill
-                              unoptimized={remoteImageUnoptimized(v.src)}
-                              sizes="(max-width: 768px) 25vw, 120px"
-                              className="object-cover opacity-90 transition duration-700 group-hover:scale-105 group-hover:opacity-100"
-                            />
-                          </div>
-                          {v.label ? (
-                            <p className="mt-1.5 text-center text-[10px] uppercase tracking-[0.18em] text-white/45 transition group-hover:text-gold-200/90">
-                              {v.label}
-                            </p>
-                          ) : null}
-                        </Link>
-                      </motion.div>
-                    );
-                  })}
+                  <HeroVariantStrip
+                    slideId={slide.id}
+                    slideTitle={slide.title}
+                    ctaHref={slide.ctaHref}
+                    variants={slide.variants}
+                  />
                 </motion.div>
               </AnimatePresence>
             ) : null}
