@@ -1,5 +1,6 @@
 import type { Category, Product } from "@/lib/types";
 import { getRootCategory, productIsShopBuyable } from "@/lib/products";
+import { pickCollectionCoverImage } from "@/lib/collections/stock-covers";
 
 export type BrandCollectionCard = {
   id: string;
@@ -11,13 +12,6 @@ export type BrandCollectionCard = {
   shopHref: string;
   sortOrder: number;
 };
-
-function productCoverImage(p: Product): string | null {
-  const first = (p.media_urls ?? [])[0];
-  if (first) return first;
-  if (p.video_poster_url) return p.video_poster_url;
-  return null;
-}
 
 function categoryTreeIds(brandId: string, categories: Category[]): Set<string> {
   const byParent = new Map<string, Category[]>();
@@ -60,8 +54,9 @@ function productsForBrand(
 }
 
 /**
- * Homepage "Find your piece" tiles — cover art from **your** listings only.
- * No Wikipedia category placeholders; brands without buyable stock are omitted.
+ * Homepage "Find your piece" tiles — model/stock covers matched to your inventory
+ * (Big Bang–style sport shots, Sub/Daytona/Nautilus heroes, etc.), with your
+ * uploaded photos as fallback. No seed Wikipedia listing thumbs.
  */
 export function buildBrandCollectionCards(
   products: Product[],
@@ -75,12 +70,11 @@ export function buildBrandCollectionCards(
     const inventory = productsForBrand(brand, products, categories);
     if (inventory.length === 0) continue;
 
-    const coverProduct =
-      inventory.find((p) => p.featured && productCoverImage(p)) ??
-      inventory.find((p) => productCoverImage(p)) ??
-      null;
-
-    const cover = coverProduct ? productCoverImage(coverProduct) : null;
+    const cover = pickCollectionCoverImage(
+      brand.slug,
+      inventory,
+      brand.image_url
+    );
     if (!cover) continue;
 
     cards.push({
