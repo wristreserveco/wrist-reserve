@@ -11,8 +11,10 @@ export const COLLECTION_COVER_OVERRIDES: Partial<Record<string, string>> = {
   /** RM 055 Bubba Watson — official Richard Mille product shot. */
   "richard-mille":
     "https://media.richardmille.com/wp-content/uploads/2019/01/23171231/richard-mille-rm-055-bubba-watson-14412.png?dpr=1&width=1200",
-  /** Santos — stainless, white dial. */
-  cartier: `${C}/thumb/7/79/Cartier_Santos_wristwatch.jpg/1280px-Cartier_Santos_wristwatch.jpg`,
+  /** Royal Oak — product shot, no wrist/hand (matches catalog-style tiles). */
+  "audemars-piguet": `${C}/0/0e/Audemars_2385_Royal_Oak_resized.jpg`,
+  /** Santos medium steel / white dial — official product render (HD). */
+  cartier: "/collection-covers/cartier-santos-wssa0029.png",
 };
 
 export function collectionCoverForBrand(
