@@ -1,4 +1,5 @@
 import type { Product } from "@/lib/types";
+import { productIsShopBuyable } from "@/lib/products";
 
 /**
  * Wikimedia Commons Rolex photography (same sourcing approach as category tiles).
@@ -145,52 +146,43 @@ export function buildCategorySlides(products: Product[]): HeroCategorySlide[] {
     // heroes are the "main line" — don't mix premium-tier inventory into Datejust etc.
     const matches = products.filter(
       (p) =>
-        p.tier !== "super_tier" && productMatchesKeywords(p, cat.keywords)
+        productIsShopBuyable(p) &&
+        p.tier !== "super_tier" &&
+        productMatchesKeywords(p, cat.keywords)
     );
 
-    // Build variant tiles from real products first. We accept either a
-    // proper photo (media_urls[0]) or the auto-generated video poster — that
-    // way collections where the user only uploaded videos still show their
-    // actual inventory instead of falling back to Wikipedia stock art.
-    const productVariants: HeroVariant[] = [];
+    // Thumbnails = your real listings only (photo or video poster). Never pad
+    // with stock Wikipedia tiles — if you only uploaded one Sub, one box shows.
+    const variants: HeroVariant[] = [];
     const seen = new Set<string>();
     for (const p of matches) {
       const img = productCoverImage(p);
       if (!img || seen.has(img)) continue;
       seen.add(img);
-      productVariants.push({
+      variants.push({
         src: img,
         label: p.name,
         href: `/products/${p.id}`,
       });
-      if (productVariants.length >= 4) break;
+      if (variants.length >= 4) break;
     }
 
-    // Prefer 4 real product tiles. If we have fewer, top up with stock
-    // fallbacks so the row never looks empty. A single real tile is enough
-    // to anchor the row in actual inventory.
-    const variants: HeroVariant[] =
-      productVariants.length >= 4
-        ? productVariants
-        : productVariants.length >= 1
-        ? [...productVariants, ...cat.fallbackVariants].slice(0, 4)
-        : cat.fallbackVariants;
+    const heroProduct =
+      matches.find((p) => p.featured && productCoverImage(p)) ??
+      matches.find((p) => productCoverImage(p)) ??
+      null;
 
-    // Hero backdrop: also prefer a real product cover (photo or video
-    // poster) over the stock Wikipedia image.
-    const heroImage =
-      productCoverImage(
-        matches.find((p) => p.featured) ?? matches[0] ?? ({} as Product)
-      ) || cat.heroImage;
+    const heroImage = heroProduct ? productCoverImage(heroProduct) : null;
 
     return {
       id: cat.id,
       name: cat.name,
       tagline: cat.tagline,
-      heroImage,
+      // Backdrop always matches your listing — never Wikipedia stock when you have stock.
+      heroImage: heroImage ?? variants[0]!.src,
       variants,
       shopHref: `/shop?q=${encodeURIComponent(cat.keywords[0])}`,
       productCount: matches.length,
     };
-  });
+  }).filter((slide) => slide.productCount > 0 && slide.variants.length > 0);
 }

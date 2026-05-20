@@ -211,7 +211,11 @@ export function HeroCarousel({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -18 }}
                   transition={{ duration: 0.7, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-                  className="grid grid-cols-4 gap-3 lg:ml-auto lg:max-w-md"
+                  className={
+                    slide.variants.length >= 4
+                      ? "grid grid-cols-4 gap-3 lg:ml-auto lg:max-w-md"
+                      : "flex flex-wrap justify-end gap-3 lg:ml-auto lg:max-w-md"
+                  }
                 >
                   {slide.variants.map((v, i) => {
                     const tileHref = v.href ?? slide.ctaHref;
@@ -221,7 +225,9 @@ export function HeroCarousel({
                         initial={{ opacity: 0, y: 16 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5, delay: 0.2 + i * 0.08 }}
-                        className="group relative"
+                        className={`group relative ${
+                          slide.variants.length < 4 ? "w-[min(28vw,120px)] shrink-0" : ""
+                        }`}
                       >
                         <Link
                           href={tileHref}

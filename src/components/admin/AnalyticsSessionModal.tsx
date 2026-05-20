@@ -139,7 +139,10 @@ export function AnalyticsSessionModal({
   const ua = parseUserAgent(session?.user_agent as string | undefined);
   const live =
     session?.last_activity_at &&
-    isLiveSession(String(session.last_activity_at));
+    isLiveSession(String(session.last_activity_at), {
+      pageViews: Number(session.page_view_count ?? 0),
+      engagedMs: Number(session.engaged_ms ?? 0),
+    });
 
   async function saveCrm() {
     if (!publicId) return;
@@ -206,7 +209,7 @@ export function AnalyticsSessionModal({
             {live ? (
               <p className="mt-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.18em] text-emerald-300">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                Active in last 15 minutes
+                Browsing now (2+ pages or 20s+ engaged)
               </p>
             ) : null}
           </div>

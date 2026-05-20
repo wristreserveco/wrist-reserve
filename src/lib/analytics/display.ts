@@ -72,7 +72,15 @@ export function pathWithQuery(path: string | null, query: string | null): string
   return q.startsWith("?") ? `${p}${q}` : `${p}?${q}`;
 }
 
-export function isLiveSession(lastActivityAt: string, windowMinutes = 15): boolean {
+/** Recent storefront activity — not a sale indicator. */
+export function isLiveSession(
+  lastActivityAt: string,
+  opts?: { windowMinutes?: number; pageViews?: number; engagedMs?: number }
+): boolean {
+  const windowMinutes = opts?.windowMinutes ?? 15;
   const t = new Date(lastActivityAt).getTime();
-  return Date.now() - t <= windowMinutes * 60 * 1000;
+  if (Date.now() - t > windowMinutes * 60 * 1000) return false;
+  const views = opts?.pageViews ?? 0;
+  const engaged = opts?.engagedMs ?? 0;
+  return views >= 2 || engaged >= 20_000;
 }

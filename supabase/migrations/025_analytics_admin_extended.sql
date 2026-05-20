@@ -46,6 +46,7 @@ as $$
         select count(*)::bigint
         from public.analytics_sessions
         where last_activity_at >= now() - interval '15 minutes'
+          and (page_view_count >= 2 or engaged_ms >= 20000)
       ),
     'returning_visitors', (select n from repeat_visitors),
     'marketing_opt_ins',

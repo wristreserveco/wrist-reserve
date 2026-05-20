@@ -215,7 +215,8 @@ export default async function AdminAnalyticsPage({
           service
             .from("analytics_sessions")
             .select("id", { count: "exact", head: true })
-            .gte("last_activity_at", liveSince),
+            .gte("last_activity_at", liveSince)
+            .or("page_view_count.gte.2,engaged_ms.gte.20000"),
           service
             .from("analytics_sessions")
             .select("id", { count: "exact", head: true })
@@ -330,9 +331,9 @@ export default async function AdminAnalyticsPage({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             {
-              k: "Live now (15m)",
+              k: "Browsing now (15m)",
               v: String(summary.live_sessions ?? 0),
-              highlight: (summary.live_sessions ?? 0) > 0,
+              hint: "2+ pages or 20s+ engaged — not sales",
             },
             { k: "Sessions", v: String(summary.sessions ?? 0) },
             { k: "Unique visitors", v: String(summary.unique_visitors ?? 0) },
@@ -355,16 +356,15 @@ export default async function AdminAnalyticsPage({
           ].map((c) => (
             <div
               key={c.k}
-              className={`rounded-sm border px-4 py-3 ${
-                "highlight" in c && c.highlight
-                  ? "border-emerald-400/40 bg-emerald-500/[0.08]"
-                  : "border-white/10 bg-black/40"
-              }`}
+              className="rounded-sm border border-white/10 bg-black/40 px-4 py-3"
             >
               <p className="text-[10px] uppercase tracking-[0.22em] text-white/35">
                 {c.k}
               </p>
               <p className="mt-1 font-display text-2xl text-white">{c.v}</p>
+              {"hint" in c && c.hint ? (
+                <p className="mt-1 text-[10px] text-white/35">{c.hint}</p>
+              ) : null}
             </div>
           ))}
         </div>
@@ -426,7 +426,10 @@ export default async function AdminAnalyticsPage({
                 ) : (
                   sessions.map((s) => {
                     const ua = parseUserAgent(s.user_agent);
-                    const live = isLiveSession(s.last_activity_at);
+                    const live = isLiveSession(s.last_activity_at, {
+                      pageViews: s.page_view_count,
+                      engagedMs: s.engaged_ms,
+                    });
                     const tags = Array.isArray(s.admin_tags) ? s.admin_tags : [];
                     return (
                       <tr
@@ -435,9 +438,9 @@ export default async function AdminAnalyticsPage({
                       >
                         <td className="whitespace-nowrap px-2 py-2">
                           {live ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300">
-                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                              Live
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-sky-300/90">
+                              <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                              Active
                             </span>
                           ) : (
                             <span className="text-white/30">—</span>
