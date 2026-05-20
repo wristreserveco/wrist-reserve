@@ -46,6 +46,7 @@ export function shouldUnoptimize(url: string): boolean {
   return (
     url.includes("unsplash") ||
     url.includes("wikimedia.org") ||
+    url.includes("richardmille.com") ||
     url.startsWith("data:")
   );
 }
