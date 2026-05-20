@@ -4,18 +4,18 @@ import type { Product } from "@/lib/types";
 import { ProductCard } from "@/components/ProductCard";
 import { HorizontalScrollRow } from "@/components/HorizontalScrollRow";
 
-/** Many featured pieces — one scrollable row with arrows when it overflows. */
-export function FeaturedProductCarousel({ products }: { products: Product[] }) {
+/** Recently shipped / on-wrist row — scroll when the list grows. */
+export function OnWristCarousel({ products }: { products: Product[] }) {
   if (products.length === 0) {
     return (
       <p className="py-12 text-center text-sm text-white/45">
-        No featured pieces yet — mark products as featured in admin.
+        Nothing spotlighted on wrists yet — toggle &quot;On wrist&quot; in admin on sold pieces.
       </p>
     );
   }
 
   return (
-    <HorizontalScrollRow ariaLabel="Featured watches">
+    <HorizontalScrollRow ariaLabel="Already on wrists">
       {products.map((p, i) => (
         <div
           key={p.id}

@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { HeroCarousel } from "@/components/HeroCarousel";
-import { ProductGrid } from "@/components/ProductGrid";
 import { FeaturedProductCarousel } from "@/components/FeaturedProductCarousel";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
 import { buildCategorySlides, type HeroCategorySlide } from "@/lib/categories";
 import { buildBrandCollectionCards } from "@/lib/collections";
 import { mapCategory, mapHeroSlide, mapProduct } from "@/lib/products";
-import { BrandCollectionCarousel } from "@/components/BrandCollectionCarousel";
+import { BrandCollectionGrid } from "@/components/BrandCollectionGrid";
+import { OnWristCarousel } from "@/components/OnWristCarousel";
 import type { Category, HeroSlide, Product } from "@/lib/types";
 import { TIER_META } from "@/lib/tiers";
 
@@ -185,11 +185,8 @@ export default async function HomePage() {
             </Link>
           </div>
           <div className="mt-10">
-            <BrandCollectionCarousel cards={brandCollections} />
+            <BrandCollectionGrid cards={brandCollections} />
           </div>
-          <p className="mt-4 text-center text-[10px] uppercase tracking-[0.22em] text-white/30 sm:hidden">
-            Swipe for more brands →
-          </p>
         </section>
       ) : null}
 
@@ -343,7 +340,7 @@ export default async function HomePage() {
             </div>
           </div>
           <div className="mt-14">
-            <ProductGrid products={sold} />
+            <OnWristCarousel products={sold} />
           </div>
         </div>
       </section>
